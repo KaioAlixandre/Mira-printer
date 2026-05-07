@@ -104,13 +104,13 @@ function resolveItemName(item) {
   );
 }
 
-function parseItemAdditionals(item) {
-  const additionalParts = [];
+function getItemAdditionalsDetailed(item) {
+  const result = [];
   const pushAdditional = (qtyRaw, nameRaw, valueRaw) => {
     const name = firstNonEmpty(nameRaw, 'Adicional');
     const qty = Number(qtyRaw || 1);
     const value = Number(valueRaw || 0);
-    additionalParts.push(`${qty}x ${name} (+${brl(value)})`);
+    result.push({ qty, name, value });
   };
 
   const additionals = Array.isArray(item?.adicionais) ? item.adicionais : [];
@@ -149,7 +149,13 @@ function parseItemAdditionals(item) {
     );
   });
 
-  return additionalParts.join(' | ');
+  return result;
+}
+
+function parseItemAdditionals(item) {
+  return getItemAdditionalsDetailed(item)
+    .map((a) => `${a.qty}x ${a.name} (+${brl(a.value)})`)
+    .join(' | ');
 }
 
 function parseItemComplements(item) {
@@ -238,25 +244,37 @@ function parseItemFlavors(item) {
   return [...new Set(flavorNames)].join(', ');
 }
 
-const items = Array.isArray(payload.itens_pedido) ? payload.itens_pedido : [];
+function getPayloadItems(payloadObj) {
+  if (Array.isArray(payloadObj?.itens_pedido)) return payloadObj.itens_pedido;
+  if (Array.isArray(payloadObj?.orderitem)) return payloadObj.orderitem;
+  return [];
+}
+
+function getItemQty(item) {
+  return Number(item?.quantidade ?? item?.quantity ?? 0);
+}
+
+function getItemBasePrice(item) {
+  return Number(item?.precoNoPedido ?? item?.priceAtOrder ?? item?.preco ?? item?.product?.price ?? 0);
+}
+
+const items = getPayloadItems(payload);
 const subtotal = items.reduce((sum, item) => {
-  const qty = Number(item.quantidade || 0);
-  const basePrice = Number(item.precoNoPedido || 0);
-  const additionalsTotal = (Array.isArray(item.adicionais) ? item.adicionais : []).reduce(
-    (acc, a) => acc + Number(a.adicional?.preco || 0) * Number(a.quantidade || 0),
-    0
-  );
+  const qty = getItemQty(item);
+  const basePrice = getItemBasePrice(item);
+  const additionalsTotal = getItemAdditionalsDetailed(item).reduce((acc, a) => acc + a.value * a.qty, 0);
   const unitTotal = basePrice + additionalsTotal;
   return sum + unitTotal * qty;
 }, 0);
 
-const deliveryFee = Number(payload.taxaEntrega || 0);
-const total = Number(payload.precoTotal || 0);
-const paymentMethodRaw = payload.metodoPagamento || payload.pagamento?.metodo || '';
+const deliveryFee = Number(payload.taxaEntrega ?? payload.deliveryFee ?? 0);
+const total = Number(payload.precoTotal ?? payload.totalPrice ?? 0);
+const paymentMethodRaw = payload.metodoPagamento || payload.paymentMethod || payload.pagamento?.metodo || '';
 const paymentMethod = formatPaymentMethod(paymentMethodRaw);
 const isPixPayment = String(paymentMethodRaw).toUpperCase() === 'PIX';
 const isCashOnDeliveryPayment = String(paymentMethodRaw).toUpperCase() === 'CASH_ON_DELIVERY';
 const isCardPayment = ['CREDIT_CARD', 'DEBIT_CARD'].includes(String(paymentMethodRaw).toUpperCase());
+const deliveryTypeRaw = payload.tipoEntrega || payload.deliveryType || '';
 const storeName =
   payload.loja?.nome ||
   payload.storeName ||
@@ -325,31 +343,47 @@ function extractItemObs(item) {
   return firstNonEmpty(item?.observacao, snap?.observacao, snap?.observation);
 }
 
+function getDeliveryReference(payloadObj) {
+  const direct = firstNonEmpty(payloadObj?.referenciaEntrega, payloadObj?.shippingReference);
+  if (direct) return direct;
+  const notes = firstNonEmpty(payloadObj?.observacoes, payloadObj?.notes);
+  if (!notes) return '';
+  for (const line of String(notes).split(/\n/)) {
+    const m = line.match(/^Refer[eê]ncia:\s*(.+)$/i);
+    if (m?.[1]) return m[1].trim();
+  }
+  return '';
+}
+
+function isCustomProduct(item) {
+  const snap = parseOptionsSnapshot(item?.opcoesSelecionadas || item?.opcoesSelecionadasSnapshot);
+  return !!(snap?.customAcai || snap?.customSorvete || snap?.customProduct);
+}
+
 const lines = [];
 lines.push(storeName);
 const storeAddress = resolveStoreAddress(payload);
 if (storeAddress) lines.push(storeAddress);
-lines.push(`#${payload.dailyNumber || payload.id} ${formatDate(payload.criadoEm)}`);
+lines.push(`#${payload.dailyNumber || payload.id} ${formatDate(payload.criadoEm || payload.createdAt)}`);
 lines.push('');
-lines.push('TIPO DE ENTREGA');
-lines.push(formatDeliveryType(payload.tipoEntrega));
-if (String(payload.tipoEntrega || '').toLowerCase() === 'delivery') {
+lines.push('-------------- TIPO DE ENTREGA -------------');
+lines.push(formatDeliveryType(deliveryTypeRaw));
+if (String(deliveryTypeRaw).toLowerCase() === 'delivery') {
   const streetLine = [payload.ruaEntrega, payload.numeroEntrega].filter(Boolean).join(', ');
   const withComp = [streetLine, payload.complementoEntrega ? `- ${payload.complementoEntrega}` : '']
     .filter(Boolean)
     .join(' ');
   if (withComp) lines.push(withComp);
   if (payload.bairroEntrega) lines.push(payload.bairroEntrega);
-  if (payload.referenciaEntrega) lines.push(`Ref.: ${payload.referenciaEntrega}`);
+  const deliveryReference = getDeliveryReference(payload);
+  if (deliveryReference) lines.push(`Ref.: ${deliveryReference}`);
 }
-if (String(payload.tipoEntrega || '').toLowerCase() === 'dine_in' && payload.identificadorMesaSenha) {
+if (String(deliveryTypeRaw).toLowerCase() === 'dine_in' && payload.identificadorMesaSenha) {
   lines.push(`Mesa: ${payload.identificadorMesaSenha}`);
 }
-if (String(payload.tipoEntrega || '').toLowerCase() === 'pickup') {
+if (String(deliveryTypeRaw).toLowerCase() === 'pickup') {
   lines.push('Cliente retira no estabelecimento');
 }
-lines.push('');
-lines.push('DADOS DO CLIENTE');
 const clientName = firstNonEmpty(
   payload.nomeClienteAvulso,
   payload.usuario?.nomeUsuario,
@@ -361,7 +395,6 @@ const clientName = firstNonEmpty(
   payload.customer?.name,
   '-'
 );
-lines.push(`Nome: ${clientName}`);
 const clientPhone = firstNonEmpty(
   payload.usuario?.telefone,
   payload.user?.phone,
@@ -370,27 +403,39 @@ const clientPhone = firstNonEmpty(
   payload.cliente?.telefone,
   payload.customer?.phone
 );
-if (clientPhone) lines.push(`Numero: ${clientPhone}`);
 const totalOrders = firstNonEmpty(payload.totalPedidos, payload.usuario?.totalPedidos, payload.user?.totalPedidos);
-if (totalOrders) lines.push(`Total de pedidos: ${totalOrders}`);
-if (payload.usuario?.email) lines.push(payload.usuario.email);
+const clientEmail = firstNonEmpty(payload.usuario?.email, payload.user?.email, payload.cliente?.email);
+const hasClientBlock = !!(
+  payload.nomeClienteAvulso ||
+  payload.usuario?.nomeUsuario ||
+  payload.usuario?.nome ||
+  payload.user?.username ||
+  clientPhone ||
+  clientEmail
+);
+if (hasClientBlock) {
+  lines.push('');
+  lines.push('-------------- DADOS DO CLIENTE ------------');
+  lines.push(`Nome: ${clientName}`);
+  if (clientPhone) lines.push(`Numero: ${clientPhone}`);
+  if (clientEmail) lines.push(clientEmail);
+  if (totalOrders) lines.push(`Total de pedidos: ${totalOrders}`);
+}
 lines.push('');
-lines.push('ITENS');
+lines.push('-------------- ITENS -------------------');
 lines.push(`${padRight('Descricao', 24)}${padLeft('Qtd', 4)} ${padLeft('Unit.', 10)}${padLeft('Total', 10)}`);
 if (!items.length) {
   lines.push('Sem itens no payload');
 } else {
   items.forEach((item) => {
-    const qty = Number(item.quantidade || 0);
-    const basePrice = Number(item.precoNoPedido || 0);
-    const additionalsTotal = (Array.isArray(item.adicionais) ? item.adicionais : []).reduce(
-      (acc, a) => acc + Number(a.adicional?.preco || 0) * Number(a.quantidade || 0),
-      0
-    );
+    const qty = getItemQty(item);
+    const basePrice = getItemBasePrice(item);
+    const additionalsTotal = getItemAdditionalsDetailed(item).reduce((acc, a) => acc + a.value * a.qty, 0);
     const unitTotal = basePrice + additionalsTotal;
     const lineTotal = unitTotal * qty;
     const itemName = resolveItemName(item);
     wrapText(itemName, receiptWidth).forEach((l) => lines.push(l));
+    if (isCustomProduct(item)) lines.push('Personalizado');
     const complements = parseItemComplements(item);
     const additionals = parseItemAdditionals(item);
     const flavors = parseItemFlavors(item);
@@ -410,18 +455,18 @@ if (payload.observacoes) {
 }
 
 lines.push('');
-lines.push('PAGAMENTO');
+lines.push('-------------- PAGAMENTO --------------');
 lines.push(`Forma ${paymentMethod}`);
 if (isPixPayment) lines.push('Pedido ja pago - nao cobrar do cliente.');
-if (isCashOnDeliveryPayment) lines.push('Dinheiro na entrega - cobrar do cliente.');
-if (isCardPayment) lines.push('Cartao na entrega - cobrar do cliente.');
+if (isCashOnDeliveryPayment) lines.push('Dinheiro na entrega - Cobrar do cliente!');
+if (isCardPayment) lines.push('Cartao na entrega - Cobrar do cliente!');
 if (isCashOnDeliveryPayment && payload.precisaTroco && payload.valorTroco) {
   const trocaPara = Number(payload.valorTroco || 0);
   lines.push(`Paga com: ${brl(trocaPara)}`);
   lines.push(`Troco: ${brl(trocaPara - total)}`);
 }
 lines.push(`Subtotal ${brl(subtotal)}`);
-if (String(payload.tipoEntrega || '').toLowerCase() === 'delivery') {
+if (String(deliveryTypeRaw).toLowerCase() === 'delivery') {
   lines.push(`Entrega ${brl(deliveryFee)}`);
 }
 lines.push(`TOTAL ${brl(total)}`);

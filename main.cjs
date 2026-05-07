@@ -156,7 +156,7 @@ function getSettings(merged, session) {
     path.join(__dirname, 'backend', 'scripts', 'auto_print_preparing_orders.js');
   scriptPath = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(__dirname, scriptPath);
 
-  const triggers = (merged.PRINT_TRIGGERS || merged.printTriggers || 'both')
+  const triggers = (merged.PRINT_TRIGGERS || merged.printTriggers || 'being_prepared')
     .toString()
     .trim()
     .toLowerCase();
