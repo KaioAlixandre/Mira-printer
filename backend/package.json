@@ -1,0 +1,56 @@
+{
+  "name": "miradelivery-backend",
+  "version": "1.0.0",
+  "description": "Backend do Mira Delivery - API REST com Node.js, Express e Prisma",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "npx prisma generate && npx prisma db push",
+    "db:create": "node scripts/create-database.js",
+    "db:generate": "npx prisma generate",
+    "db:push": "npx prisma db push",
+    "db:migrate": "npx prisma migrate deploy",
+    "db:reset": "npx prisma migrate reset",
+    "db:studio": "npx prisma studio",
+    "db:seed": "node prisma/seed.js",
+    "backfill:magic-links": "node scripts/backfill-magic-links.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "açaí",
+    "api",
+    "nodejs",
+    "express",
+    "prisma",
+    "mysql"
+  ],
+  "author": "Aleff",
+  "license": "MIT",
+  "dependencies": {
+    "@prisma/client": "^6.16.2",
+    "axios": "^1.12.2",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
+    "cloudinary": "^1.41.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "multer-storage-cloudinary": "^4.0.0",
+    "mysql2": "^3.6.0",
+    "nodemailer": "^7.0.6",
+    "socket.io": "^4.8.3",
+    "streamifier": "^0.1.1",
+    "stripe": "^22.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0",
+    "prisma": "^6.16.2"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  }
+}

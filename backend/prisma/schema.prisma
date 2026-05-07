@@ -1,0 +1,866 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// MODELO PRINCIPAL (TENANT)
+// ==========================================
+model loja {
+  id               Int      @id @default(autoincrement())
+  nome             String   @db.VarChar(100)
+  subdominio       String   @unique(map: "Loja_subdominio_key") @db.VarChar(50)
+  corPrimaria      String?  @default("#000000") @db.VarChar(7)
+  /// Fundo do banner do topo (Home/Cardápio). Se null, usa corPrimaria.
+  corBannerHero    String?  @db.VarChar(7)
+  /// Cor do título no banner (ex.: nome da loja). Se null, usa branco.
+  corHeroTitulo    String?  @db.VarChar(7)
+  /// Cor do slogan/subtítulo no banner. Se null, usa tom claro padrão (rose-100).
+  corHeroSubtitulo String?  @db.VarChar(7)
+  /// Chave da fonte do banner (ex.: inter, poppins). Se null, usa inter.
+  fonteHero        String?  @db.VarChar(32)
+  planoMensal      String   @default("simples") @db.VarChar(20)
+  stripeCustomerId String?  @db.VarChar(255)
+  stripeSubscriptionId String? @db.VarChar(255)
+  stripePriceId    String?  @db.VarChar(255)
+  assinaturaStatus String?  @db.VarChar(50)
+  assinaturaRenovaEm DateTime?
+  criadoEm         DateTime @default(now())
+  atualizadoEm     DateTime @updatedAt
+
+  // Relacionamentos com os dados da loja
+  usuarios                      usuario[]
+  produtos                      produto[]
+  categorias_produto            categoria_produto[]
+  pedidos                       pedido[]
+  configuracao_loja             configuracao_loja?
+  cupons                        cupom[]
+  entregadores                  entregador[]
+  cozinheiros                   cozinheiro[]
+  complementos                  complemento[]
+  categorias_complemento        categoria_complemento[]
+  sabores                       sabor[]
+  categorias_sabor              categoria_sabor[]
+  adicionais                    adicional[]
+  categorias_adicional          categoria_adicional[]
+  carrinhos                     carrinho[]
+  relatorios_diarios            relatorio_vendas_diario[]
+  bairros_entrega               bairro_entrega[]
+  mesas                         mesa[]
+  zapi_primeiras_interacoes_dia zapi_primeira_interacao_dia[]
+  zapi_remetentes_mensagem      zapi_remetente_mensagem[]
+  menu_visitas                  menu_visita[]
+  usuario_magic_links           usuario_magic_link[]
+  usuario_refresh_tokens        usuario_refresh_token[]
+
+  @@map("lojas")
+}
+
+model adicional {
+  id           Int      @id @default(autoincrement())
+  lojaId       Int
+  nome         String   @db.VarChar(100)
+  valor        Decimal  @default(0.00) @db.Decimal(10, 2)
+  imagemUrl    String?  @db.VarChar(255)
+  ativo        Boolean  @default(true)
+  categoriaId  Int?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  loja          loja                      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  categoria     categoria_adicional?      @relation(fields: [categoriaId], references: [id], map: "Additional_categoryId_fkey")
+  itensCarrinho item_carrinho_adicional[]
+  itensPedido   item_pedido_adicional[]
+
+  @@index([lojaId])
+  @@index([categoriaId], map: "Additional_categoryId_fkey")
+  @@map("adicionais")
+}
+
+model categoria_adicional {
+  id           Int      @id @default(autoincrement())
+  lojaId       Int
+  nome         String   @db.VarChar(100)
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  loja       loja                          @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  adicionais adicional[]
+  produtos   produto_categoria_adicional[]
+
+  @@unique([lojaId, nome], map: "AdditionalCategory_lojaId_name_key")
+  @@map("categorias_adicional")
+}
+
+// ==========================================
+// DEMAIS MODELOS
+// ==========================================
+
+model endereco {
+  id              Int     @id @default(autoincrement())
+  rua             String  @db.VarChar(255)
+  numero          String  @db.VarChar(20)
+  complemento     String? @db.VarChar(100)
+  bairro          String  @db.VarChar(100)
+  pontoReferencia String? @db.VarChar(255)
+  padrao          Boolean @default(false)
+  usuarioId       Int
+  usuario         usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade, map: "Endereco_userId_fkey")
+
+  @@index([usuarioId], map: "Endereco_userId_fkey")
+  @@map("enderecos")
+}
+
+model carrinho {
+  id        Int      @id @default(autoincrement())
+  lojaId    Int
+  usuarioId Int      @unique(map: "Carrinho_userId_key")
+  criadoEm  DateTime @default(now())
+
+  loja    loja            @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  usuario usuario         @relation(fields: [usuarioId], references: [id], onDelete: Cascade, map: "Carrinho_userId_fkey")
+  itens   item_carrinho[]
+
+  @@index([lojaId])
+  @@index([usuarioId], map: "Carrinho_userId_fkey")
+  @@map("carrinhos")
+}
+
+model item_carrinho {
+  id                 Int                         @id @default(autoincrement())
+  carrinhoId         Int
+  produtoId          Int
+  quantidade         Int
+  criadoEm           DateTime                    @default(now())
+  opcoesSelecionadas Json?
+  carrinho           carrinho                    @relation(fields: [carrinhoId], references: [id], onDelete: Cascade, map: "CartItem_cartId_fkey")
+  produto            produto                     @relation(fields: [produtoId], references: [id], onDelete: Cascade, map: "CartItem_productId_fkey")
+  complementos       item_carrinho_complemento[]
+  adicionais         item_carrinho_adicional[]
+  sabores            item_carrinho_sabor[]
+
+  @@index([produtoId], map: "CartItem_productId_fkey")
+  @@map("itens_carrinho")
+}
+
+model item_carrinho_complemento {
+  id             Int           @id @default(autoincrement())
+  itemCarrinhoId Int
+  complementoId  Int
+  criadoEm       DateTime      @default(now())
+  itemCarrinho   item_carrinho @relation(fields: [itemCarrinhoId], references: [id], onDelete: Cascade)
+  complemento    complemento   @relation(fields: [complementoId], references: [id], onDelete: Cascade)
+
+  @@index([itemCarrinhoId])
+  @@index([complementoId])
+  @@map("itens_carrinho_complementos")
+}
+
+model item_carrinho_adicional {
+  id             Int           @id @default(autoincrement())
+  itemCarrinhoId Int
+  adicionalId    Int
+  quantidade     Int           @default(1)
+  criadoEm       DateTime      @default(now())
+  itemCarrinho   item_carrinho @relation(fields: [itemCarrinhoId], references: [id], onDelete: Cascade)
+  adicional      adicional     @relation(fields: [adicionalId], references: [id], onDelete: Cascade)
+
+  @@index([itemCarrinhoId])
+  @@index([adicionalId])
+  @@map("itens_carrinho_adicionais")
+}
+
+model item_carrinho_sabor {
+  id             Int           @id @default(autoincrement())
+  itemCarrinhoId Int
+  saborId        Int
+  quantidade     Int           @default(1)
+  criadoEm       DateTime      @default(now())
+  itemCarrinho   item_carrinho @relation(fields: [itemCarrinhoId], references: [id], onDelete: Cascade)
+  sabor          sabor         @relation(fields: [saborId], references: [id], onDelete: Cascade)
+
+  @@index([itemCarrinhoId])
+  @@index([saborId])
+  @@map("itens_carrinho_sabores")
+}
+
+model complemento {
+  id           Int      @id @default(autoincrement())
+  lojaId       Int
+  nome         String   @db.VarChar(100)
+  imagemUrl    String?  @db.VarChar(255)
+  ativo        Boolean  @default(true)
+  categoriaId  Int?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  loja          loja                        @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  categoria     categoria_complemento?      @relation(fields: [categoriaId], references: [id], map: "Complement_categoryId_fkey")
+  itensCarrinho item_carrinho_complemento[]
+  itensPedido   item_pedido_complemento[]
+
+  @@index([lojaId])
+  @@index([categoriaId], map: "Complement_categoryId_fkey")
+  @@map("complementos")
+}
+
+model categoria_complemento {
+  id           Int      @id @default(autoincrement())
+  lojaId       Int
+  nome         String   @db.VarChar(100)
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  loja         loja          @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  complementos complemento[]
+
+  // O nome da categoria deve ser único dentro da mesma loja
+  @@unique([lojaId, nome], map: "ComplementCategory_lojaId_name_key")
+  @@map("categorias_complemento")
+}
+
+model sabor {
+  id           Int      @id @default(autoincrement())
+  lojaId       Int
+  nome         String   @db.VarChar(100)
+  imagemUrl    String?  @db.VarChar(255)
+  ativo        Boolean  @default(true)
+  categoriaId  Int?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  loja          loja                  @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  categoria     categoria_sabor?      @relation(fields: [categoriaId], references: [id], map: "Flavor_categoryId_fkey")
+  itensCarrinho item_carrinho_sabor[]
+  itensPedido   item_pedido_sabor[]
+
+  @@index([lojaId])
+  @@index([categoriaId], map: "Flavor_categoryId_fkey")
+  @@map("sabores")
+}
+
+model categoria_sabor {
+  id           Int      @id @default(autoincrement())
+  lojaId       Int
+  nome         String   @db.VarChar(100)
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  loja     loja                      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  sabores  sabor[]
+  produtos produto_categoria_sabor[]
+
+  @@unique([lojaId, nome], map: "FlavorCategory_lojaId_name_key")
+  @@map("categorias_sabor")
+}
+
+model produto_categoria_sabor {
+  id               Int             @id @default(autoincrement())
+  produtoId        Int
+  categoriaSaborId Int
+  quantidade       Int             @default(1)
+  produto          produto         @relation(fields: [produtoId], references: [id], onDelete: Cascade, map: "ProductFlavorCategory_productId_fkey")
+  categoriaSabor   categoria_sabor @relation(fields: [categoriaSaborId], references: [id], onDelete: Cascade, map: "ProductFlavorCategory_categoriaSaborId_fkey")
+
+  @@unique([produtoId, categoriaSaborId], map: "ProductFlavorCategory_productId_categoriaSaborId_key")
+  @@index([produtoId], map: "ProductFlavorCategory_productId_fkey")
+  @@index([categoriaSaborId], map: "ProductFlavorCategory_categoriaSaborId_fkey")
+  @@map("produto_categoria_sabor")
+}
+
+model produto_categoria_adicional {
+  id                   Int                 @id @default(autoincrement())
+  produtoId            Int
+  categoriaAdicionalId Int
+  quantidade           Int                 @default(1)
+  produto              produto             @relation(fields: [produtoId], references: [id], onDelete: Cascade, map: "ProductAdditionalCategory_productId_fkey")
+  categoriaAdicional   categoria_adicional @relation(fields: [categoriaAdicionalId], references: [id], onDelete: Cascade, map: "ProductAdditionalCategory_categoriaAdicionalId_fkey")
+
+  @@unique([produtoId, categoriaAdicionalId], map: "ProductAdditionalCategory_produtoId_categoriaAdicionalId_key")
+  @@index([produtoId], map: "ProductAdditionalCategory_productId_fkey")
+  @@index([categoriaAdicionalId], map: "ProductAdditionalCategory_categoriaAdicionalId_fkey")
+  @@map("produto_categoria_adicional")
+}
+
+model cupom {
+  id           Int                 @id @default(autoincrement())
+  lojaId       Int
+  codigo       String              @db.VarChar(50)
+  tipoDesconto tipo_desconto_cupom
+  valor        Decimal             @db.Decimal(10, 2)
+  expiraEm     DateTime?
+  ativo        Boolean             @default(true)
+  maxUsos      Int?
+  contadorUsos Int                 @default(0)
+
+  loja         loja           @relation(fields: [lojaId], references: [id], onDelete: Cascade, map: "Coupon_lojaId_fkey")
+  cupom_pedido cupom_pedido[]
+
+  // O código do cupom deve ser único por loja (ex: DUAS lojas podem ter "BEMVINDO10")
+  @@unique([lojaId, codigo], map: "Coupon_lojaId_code_key")
+  @@map("cupons")
+}
+
+model entregador {
+  id       Int      @id @default(autoincrement())
+  lojaId   Int
+  nome     String   @db.VarChar(100)
+  telefone String   @db.VarChar(20)
+  email    String?  @db.VarChar(100)
+  ativo    Boolean  @default(true)
+  criadoEm DateTime @default(now())
+
+  loja    loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  pedidos pedido[]
+
+  @@index([lojaId])
+  @@map("entregadores")
+}
+
+model valor_opcao {
+  id               Int           @id @default(autoincrement())
+  valor            String        @db.VarChar(100)
+  modificadorPreco Decimal       @default(0.00) @db.Decimal(10, 2)
+  opcaoId          Int
+  opcao_produto    opcao_produto @relation(fields: [opcaoId], references: [id], onDelete: Cascade, map: "OptionValue_optionId_fkey")
+
+  @@index([opcaoId], map: "OptionValue_optionId_fkey")
+  @@map("valores_opcao")
+}
+
+model pedido {
+  id                     Int               @id @default(autoincrement())
+  lojaId                 Int
+  usuarioId              Int
+  /// Quem registrou o pedido no PDV/mesa (ex.: garçom). Opcional.
+  criadoPorUsuarioId     Int?
+  status                 status_pedido     @default(being_prepared)
+  precoTotal             Decimal           @db.Decimal(10, 2)
+  criadoEm               DateTime          @default(now())
+  /// Instante em que o pedido passou a "em preparo" (cronômetro do painel admin)
+  inicioPreparoEm        DateTime?
+  nomeClienteAvulso      String?           @db.VarChar(100)
+  identificadorMesaSenha String?           @db.VarChar(50)
+  /// FK opcional para exibir o nome da mesa (`mesa.nome`) no painel
+  mesaId                 Int?
+  complementoEntrega     String?
+  bairroEntrega          String?
+  numeroEntrega          String?
+  ruaEntrega             String?
+  telefoneEntrega        String?
+  /// Ponto de referência do endereço de entrega (snapshot no pedido)
+  referenciaEntrega      String?           @db.VarChar(255)
+  taxaEntrega            Decimal           @default(0.00) @db.Decimal(10, 2)
+  tipoEntrega            String            @default("delivery")
+  metodoPagamento        metodo_pagamento?
+  entregadorId           Int?
+  observacoes            String?           @db.Text
+  precisaTroco           Boolean           @default(false)
+  valorTroco             Decimal?          @db.Decimal(10, 2)
+  /// Instante em que o pedido foi marcado como "a caminho"
+  saiuParaEntregaEm      DateTime?
+  atualizadoEm           DateTime          @updatedAt
+
+  loja         loja          @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  mesa         mesa?         @relation(fields: [mesaId], references: [id], onDelete: SetNull, map: "pedidos_mesaId_fkey")
+  entregador   entregador?   @relation(fields: [entregadorId], references: [id], map: "Order_delivererId_fkey")
+  usuario      usuario       @relation("PedidoCliente", fields: [usuarioId], references: [id], onDelete: Cascade, map: "Order_userId_fkey")
+  criadoPor    usuario?      @relation("PedidoCriadoPorGarcom", fields: [criadoPorUsuarioId], references: [id], onDelete: SetNull, map: "Order_criadoPorUsuarioId_fkey")
+  cupom_pedido cupom_pedido?
+  itens_pedido item_pedido[]
+  pagamento    pagamento?
+
+  @@index([lojaId])
+  @@index([mesaId], map: "pedidos_mesaId_idx")
+  @@index([entregadorId], map: "Order_delivererId_fkey")
+  @@index([usuarioId], map: "Order_userId_fkey")
+  @@index([criadoPorUsuarioId], map: "Order_criadoPorUsuarioId_idx")
+  @@map("pedidos")
+}
+
+model cupom_pedido {
+  id            Int     @id @default(autoincrement())
+  pedidoId      Int     @unique(map: "OrderCoupon_orderId_key")
+  cupomId       Int
+  valorDesconto Decimal @db.Decimal(10, 2)
+  cupom         cupom   @relation(fields: [cupomId], references: [id], map: "OrderCoupon_couponId_fkey")
+  pedido        pedido  @relation(fields: [pedidoId], references: [id], map: "OrderCoupon_orderId_fkey")
+
+  @@index([cupomId], map: "OrderCoupon_couponId_fkey")
+  @@map("cupons_pedido")
+}
+
+model item_pedido {
+  id                         Int                       @id @default(autoincrement())
+  pedidoId                   Int
+  produtoId                  Int
+  quantidade                 Int
+  precoNoPedido              Decimal                   @db.Decimal(10, 2)
+  opcoesSelecionadasSnapshot Json?
+  pedido                     pedido                    @relation(fields: [pedidoId], references: [id], onDelete: Cascade, map: "OrderItem_orderId_fkey")
+  produto                    produto?                  @relation(fields: [produtoId], references: [id], onDelete: Cascade, map: "OrderItem_productId_fkey")
+  complementos               item_pedido_complemento[]
+  adicionais                 item_pedido_adicional[]
+  sabores                    item_pedido_sabor[]
+
+  @@index([pedidoId], map: "OrderItem_orderId_fkey")
+  @@index([produtoId], map: "OrderItem_productId_fkey")
+  @@map("itens_pedido")
+}
+
+model item_pedido_adicional {
+  id           Int         @id @default(autoincrement())
+  itemPedidoId Int
+  adicionalId  Int
+  quantidade   Int         @default(1)
+  criadoEm     DateTime    @default(now())
+  itemPedido   item_pedido @relation(fields: [itemPedidoId], references: [id], onDelete: Cascade)
+  adicional    adicional   @relation(fields: [adicionalId], references: [id], onDelete: Cascade)
+
+  @@index([itemPedidoId])
+  @@index([adicionalId])
+  @@map("itens_pedido_adicionais")
+}
+
+model item_pedido_complemento {
+  id            Int          @id @default(autoincrement())
+  itemPedidoId  Int
+  complementoId Int
+  criadoEm      DateTime     @default(now())
+  itemPedido    item_pedido  @relation(fields: [itemPedidoId], references: [id], onDelete: Cascade)
+  complemento   complemento? @relation(fields: [complementoId], references: [id], onDelete: Cascade)
+
+  @@index([itemPedidoId])
+  @@index([complementoId])
+  @@map("itens_pedido_complementos")
+}
+
+model item_pedido_sabor {
+  id           Int         @id @default(autoincrement())
+  itemPedidoId Int
+  saborId      Int
+  quantidade   Int         @default(1)
+  criadoEm     DateTime    @default(now())
+  itemPedido   item_pedido @relation(fields: [itemPedidoId], references: [id], onDelete: Cascade)
+  sabor        sabor       @relation(fields: [saborId], references: [id], onDelete: Cascade)
+
+  @@index([itemPedidoId])
+  @@index([saborId])
+  @@map("itens_pedido_sabores")
+}
+
+model pagamento {
+  id           Int              @id @default(autoincrement())
+  valor        Decimal          @db.Decimal(10, 2)
+  metodo       metodo_pagamento
+  status       status_pagamento @default(PENDING)
+  idTransacao  String?          @db.VarChar(255)
+  criadoEm     DateTime         @default(now())
+  atualizadoEm DateTime         @updatedAt
+  pedidoId     Int              @unique(map: "Payment_orderId_key")
+  pedido       pedido           @relation(fields: [pedidoId], references: [id], onDelete: Cascade, map: "Payment_orderId_fkey")
+
+  @@map("pagamentos")
+}
+
+model produto {
+  id                     Int      @id @default(autoincrement())
+  lojaId                 Int
+  nome                   String   @db.VarChar(255)
+  preco                  Decimal  @db.Decimal(10, 2)
+  descricao              String?  @db.VarChar(150)
+  criadoEm               DateTime @default(now())
+  categoriaId            Int?
+  ativo                  Boolean  @default(true)
+  destaque               Boolean  @default(false)
+  recebeComplementos     Boolean  @default(false)
+  quantidadeComplementos Int?     @default(0)
+  recebeSabores          Boolean  @default(false)
+  recebeAdicionais       Boolean  @default(false)
+  diasAtivos             String?  @db.VarChar(50)
+
+  loja                 loja                          @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  itens_carrinho       item_carrinho[]
+  itens_pedido         item_pedido[]
+  categoria            categoria_produto?            @relation(fields: [categoriaId], references: [id], map: "Product_categoryId_fkey")
+  imagens_produto      imagem_produto[]
+  opcoes_produto       opcao_produto[]
+  relatorios_vendas    relatorio_vendas_produto[]
+  avaliacoes           avaliacao[]
+  categorias_sabor     produto_categoria_sabor[]
+  categorias_adicional produto_categoria_adicional[]
+
+  @@index([lojaId])
+  @@index([categoriaId], map: "Product_categoryId_fkey")
+  @@map("produtos")
+}
+
+model categoria_produto {
+  id     Int    @id @default(autoincrement())
+  lojaId Int
+  nome   String @db.VarChar(100)
+  ordem  Int    @default(0)
+  ativo  Boolean @default(true)
+
+  loja              loja                         @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  relatorios_vendas relatorio_vendas_categoria[]
+  produtos          produto[]
+
+  @@unique([lojaId, nome], map: "ProductCategory_lojaId_name_key")
+  @@map("categorias_produto")
+}
+
+model imagem_produto {
+  id        Int     @id @default(autoincrement())
+  url       String  @db.VarChar(255)
+  textoAlt  String? @db.VarChar(255)
+  produtoId Int
+  produto   produto @relation(fields: [produtoId], references: [id], onDelete: Cascade, map: "ProductImage_productId_fkey")
+
+  @@index([produtoId], map: "ProductImage_productId_fkey")
+  @@map("imagens_produto")
+}
+
+model opcao_produto {
+  id            Int           @id @default(autoincrement())
+  nome          String        @db.VarChar(100)
+  produtoId     Int
+  valores_opcao valor_opcao[]
+  produto       produto       @relation(fields: [produtoId], references: [id], onDelete: Cascade, map: "ProductOption_productId_fkey")
+
+  @@index([produtoId], map: "ProductOption_productId_fkey")
+  @@map("opcoes_produto")
+}
+
+model avaliacao {
+  id         Int      @id @default(autoincrement())
+  avaliacao  Int
+  comentario String?  @db.Text
+  criadoEm   DateTime @default(now())
+  usuarioId  Int
+  produtoId  Int
+  produto    produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade, map: "Review_productId_fkey")
+  usuario    usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade, map: "Review_userId_fkey")
+
+  @@unique([usuarioId, produtoId], map: "Review_userId_productId_key")
+  @@index([produtoId], map: "Review_productId_fkey")
+  @@map("avaliacoes")
+}
+
+model configuracao_loja {
+  id                                 Int      @id @default(autoincrement())
+  lojaId                             Int      @unique
+  logoUrl                            String?  @db.VarChar(1024)
+  telefoneWhatsapp                   String?  @db.VarChar(20)
+  telefoneGerente                    String?  @db.VarChar(20)
+  chavePix                           String?  @db.VarChar(255)
+  enderecoLoja                       String?  @db.VarChar(255)
+  ruaLoja                            String?  @db.VarChar(255)
+  bairroLoja                         String?  @db.VarChar(255)
+  numeroLoja                         String?  @db.VarChar(20)
+  pontoReferenciaLoja                String?  @db.VarChar(255)
+  slogan                             String?  @db.VarChar(255)
+  instagramUrl                       String?  @db.VarChar(1024)
+  aberto                             Boolean  @default(true)
+  deliveryAtivo                      Boolean  @default(true)
+  cancelamentoPagamentoPendenteAtivo Boolean  @default(true)
+  pagamentoPixAtivo                  Boolean  @default(true)
+  pagamentoDinheiroEntregaAtivo      Boolean  @default(true)
+  pagamentoDinheiroRetiradaAtivo     Boolean  @default(true)
+  pagamentoCartaoEntregaAtivo        Boolean  @default(true)
+  pagamentoCartaoRetiradaAtivo       Boolean  @default(true)
+  taxaEntrega                        Decimal  @default(0.00) @db.Decimal(10, 2)
+  valorPedidoMinimo                  Decimal? @db.Decimal(10, 2)
+  raioEntregaKm                      Decimal? @db.Decimal(10, 2)
+  estimativaEntrega                  String?  @db.VarChar(50)
+  horaAbertura                       String   @db.VarChar(5)
+  horaFechamento                     String   @db.VarChar(5)
+  diasAbertos                        String   @db.VarChar(20)
+  horariosPorDia                     Json?
+  horarioDeliveryPorDia              Json?
+  promocaoTaxaAtiva                  Boolean  @default(false)
+  promocaoDias                       String?  @db.VarChar(20)
+  promocaoValorMinimo                Decimal? @db.Decimal(10, 2)
+  atualizadoEm                       DateTime @updatedAt
+  horaEntregaInicio                  String?  @db.VarChar(5)
+  horaEntregaFim                     String?  @db.VarChar(5)
+  zapApiToken                        String?  @db.VarChar(255)
+  zapApiInstance                     String?  @db.VarChar(255)
+  zapApiClientToken                  String?  @db.VarChar(255)
+  mensagensWhatsapp                  Json?
+  autoPrintPreparingEnabled          Boolean  @default(false)
+  autoPrintPreparingCommand          String?  @db.VarChar(512)
+  autoPrintPrinterType               String?  @db.VarChar(50)
+  autoPrintPrinterTarget             String?  @db.VarChar(255)
+  autoPrintPaperWidthMm              Int?     @default(80)
+
+  loja loja @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@map("configuracoes_loja")
+}
+
+model bairro_entrega {
+  id              Int      @id @default(autoincrement())
+  lojaId          Int
+  nome            String   @db.VarChar(100)
+  nomeNormalizado String   @db.VarChar(100)
+  taxaEntrega     Decimal  @default(0.00) @db.Decimal(10, 2)
+  criadoEm        DateTime @default(now())
+  atualizadoEm    DateTime @updatedAt
+
+  loja loja @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@unique([lojaId, nomeNormalizado], map: "DeliveryNeighborhood_lojaId_normalized_key")
+  @@index([lojaId])
+  @@map("bairros_entrega")
+}
+
+model cozinheiro {
+  id           Int      @id @default(autoincrement())
+  lojaId       Int
+  nome         String   @db.VarChar(100)
+  telefone     String   @db.VarChar(20)
+  ativo        Boolean  @default(true)
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  loja loja @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@index([lojaId])
+  @@map("cozinheiros")
+}
+
+model mesa {
+  id            Int      @id @default(autoincrement())
+  lojaId        Int
+  nome          String   @db.VarChar(100)
+  identificador String?  @db.VarChar(50)
+  ativo         Boolean  @default(true)
+  criadoEm      DateTime @default(now())
+
+  loja    loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  pedidos pedido[]
+
+  @@index([lojaId])
+  @@map("mesas")
+}
+
+model usuario {
+  id          Int            @id @default(autoincrement())
+  lojaId      Int
+  nomeUsuario String         @db.VarChar(50)
+  email       String?        @db.VarChar(100)
+  senha       String         @db.VarChar(255)
+  funcao      funcao_usuario @default(user)
+  criadoEm    DateTime       @default(now())
+  telefone    String?        @db.VarChar(20)
+
+  loja                     loja        @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  enderecos                endereco[]
+  carrinho                 carrinho?
+  pedidos                  pedido[]    @relation("PedidoCliente")
+  pedidosCriadosComoGarcom pedido[]    @relation("PedidoCriadoPorGarcom")
+  avaliacoes               avaliacao[]
+  magicLinks               usuario_magic_link[]
+  refreshTokens            usuario_refresh_token[]
+
+  // Isolando contas de usuários por loja
+  @@unique([lojaId, nomeUsuario], map: "User_lojaId_username_key")
+  @@unique([lojaId, email], map: "User_lojaId_email_key")
+  @@unique([lojaId, telefone], map: "User_lojaId_telefone_key")
+  @@map("usuarios")
+}
+
+/// Link mágico de login (token na URL; apenas SHA-256 armazenado).
+model usuario_magic_link {
+  id        Int       @id @default(autoincrement())
+  lojaId    Int
+  usuarioId Int
+  shortCode String?   @unique(map: "UsuarioMagicLink_shortCode_key") @db.VarChar(16)
+  tokenHash String    @unique @db.VarChar(64)
+  tokenRaw  String?   @db.VarChar(255)
+  expiresAt DateTime
+  usedAt    DateTime?
+  criadoEm  DateTime  @default(now())
+
+  loja    loja    @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  usuario usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([lojaId, usuarioId], map: "UsuarioMagicLink_lojaId_usuarioId_key")
+  @@map("usuario_magic_links")
+}
+
+/// Sessões persistentes para renovar JWT (refresh token em cookie HttpOnly).
+model usuario_refresh_token {
+  id         Int       @id @default(autoincrement())
+  lojaId     Int
+  usuarioId  Int
+  tokenHash  String    @unique @db.VarChar(64)
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  criadoEm   DateTime  @default(now())
+
+  loja    loja    @relation(fields: [lojaId], references: [id], onDelete: Cascade, map: "UsuarioRefreshToken_lojaId_fkey")
+  usuario usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade, map: "UsuarioRefreshToken_usuarioId_fkey")
+
+  @@index([lojaId, usuarioId], map: "UsuarioRefreshToken_lojaId_usuarioId_idx")
+  @@index([expiresAt], map: "UsuarioRefreshToken_expiresAt_idx")
+  @@map("usuario_refresh_tokens")
+}
+
+model redefinicao_senha {
+  id       Int      @id @default(autoincrement())
+  telefone String   @db.VarChar(20)
+  codigo   String   @db.VarChar(6)
+  criadoEm DateTime @default(now())
+  expiraEm DateTime
+  usado    Boolean  @default(false)
+
+  @@index([telefone])
+  @@index([codigo])
+  @@map("redefinicoes_senha")
+}
+
+model zapi_primeira_interacao_dia {
+  id             Int      @id @default(autoincrement())
+  lojaId         Int
+  telefone       String   @db.VarChar(20)
+  dataReferencia DateTime @db.Date
+  criadoEm       DateTime @default(now())
+  atualizadoEm   DateTime @updatedAt
+
+  loja loja @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@unique([lojaId, telefone], map: "ZapiPrimeiraInteracaoDia_lojaId_telefone_key")
+  @@index([lojaId, dataReferencia], map: "ZapiPrimeiraInteracaoDia_lojaId_dataReferencia_idx")
+  @@map("zapi_primeiras_interacoes_dia")
+}
+
+/// Cada linha representa um remetente único (telefone) que enviou mensagem
+/// para o WhatsApp da loja via webhook Z-API. Usado para métrica de
+/// "pessoas que mandaram mensagem".
+model zapi_remetente_mensagem {
+  id             Int      @id @default(autoincrement())
+  lojaId         Int
+  telefone       String   @db.VarChar(20)
+  totalMensagens Int      @default(1)
+  primeiraEm     DateTime @default(now())
+  ultimaEm       DateTime @default(now())
+
+  loja loja @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@unique([lojaId, telefone], map: "ZapiRemetenteMensagem_lojaId_telefone_key")
+  @@index([lojaId, primeiraEm], map: "ZapiRemetenteMensagem_lojaId_primeiraEm_idx")
+  @@index([lojaId, ultimaEm], map: "ZapiRemetenteMensagem_lojaId_ultimaEm_idx")
+  @@map("zapi_remetentes_mensagem")
+}
+
+/// Cada linha representa um visitante único do link do cardápio da loja.
+/// O `visitanteHash` é um identificador estável gerado no cliente
+/// (armazenado em localStorage) para distinguir visitantes anônimos.
+model menu_visita {
+  id            Int      @id @default(autoincrement())
+  lojaId        Int
+  visitanteHash String   @db.VarChar(64)
+  totalAcessos  Int      @default(1)
+  primeiroEm    DateTime @default(now())
+  ultimoEm      DateTime @default(now())
+
+  loja loja @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@unique([lojaId, visitanteHash], map: "MenuVisita_lojaId_visitanteHash_key")
+  @@index([lojaId, primeiroEm], map: "MenuVisita_lojaId_primeiroEm_idx")
+  @@index([lojaId, ultimoEm], map: "MenuVisita_lojaId_ultimoEm_idx")
+  @@map("menu_visitas")
+}
+
+// ==========================================
+// RELATÓRIOS (Atualizados com lojaId)
+// ==========================================
+
+model relatorio_vendas_categoria {
+  id               Int               @id @default(autoincrement())
+  lojaId           Int
+  data             DateTime          @db.Date
+  unidadesVendidas Int
+  receitaTotal     Decimal           @db.Decimal(12, 2)
+  categoriaId      Int
+  categoria        categoria_produto @relation(fields: [categoriaId], references: [id], onDelete: Cascade, map: "CategorySalesReport_categoryId_fkey")
+
+  @@unique([lojaId, data, categoriaId], map: "CategorySalesReport_lojaId_date_categoryId_key")
+  @@index([categoriaId], map: "CategorySalesReport_categoryId_fkey")
+  @@map("relatorios_vendas_categoria")
+}
+
+model relatorio_vendas_diario {
+  id                 Int      @id @default(autoincrement())
+  lojaId             Int
+  data               DateTime @db.Date
+  vendasTotais       Decimal  @db.Decimal(12, 2)
+  contadorPedidos    Int
+  itensVendidosTotal Int
+  valorMedioPedido   Decimal  @db.Decimal(12, 2)
+
+  loja loja @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@unique([lojaId, data], map: "DailySalesReport_lojaId_date_key")
+  @@map("relatorios_vendas_diario")
+}
+
+model relatorio_vendas_produto {
+  id               Int      @id @default(autoincrement())
+  lojaId           Int
+  data             DateTime @db.Date
+  unidadesVendidas Int
+  receitaTotal     Decimal  @db.Decimal(12, 2)
+  produtoId        Int
+  produto          produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade, map: "ProductSalesReport_productId_fkey")
+
+  @@unique([lojaId, data, produtoId], map: "ProductSalesReport_lojaId_date_productId_key")
+  @@index([produtoId], map: "ProductSalesReport_productId_fkey")
+  @@map("relatorios_vendas_produto")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum tipo_desconto_cupom {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum status_pedido {
+  pending_payment
+  being_prepared
+  ready_for_pickup
+  on_the_way
+  delivered
+  canceled
+  closed // Pedido de mesa fechado (conta fechada) — entra nas métricas
+}
+
+enum metodo_pagamento {
+  CREDIT_CARD
+  PIX
+  CASH_ON_DELIVERY
+}
+
+enum status_pagamento {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum funcao_usuario {
+  user
+  admin
+  waiter
+  master // Para você, dono do sistema, gerenciar as lojas!
+}

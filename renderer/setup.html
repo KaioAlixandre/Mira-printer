@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Configurar — Mira Printer</title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      label {
+        font-size: 0.85rem;
+        opacity: 0.9;
+      }
+      input {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid #444;
+        background: #2d2d2d;
+        color: #eee;
+        font: inherit;
+      }
+      button.primary {
+        margin-top: 8px;
+        padding: 10px;
+        border-radius: 8px;
+        border: none;
+        background: #2e7d32;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .errbox {
+        color: #ffab91;
+        font-size: 0.85rem;
+        min-height: 1.2em;
+      }
+      .note {
+        font-size: 0.75rem;
+        opacity: 0.65;
+        margin-top: 8px;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Login da impressora</h1>
+      <p class="note">
+        Login SaaS: mesmo <strong>telefone</strong> e senha de <strong>admin/master</strong> do painel da loja (<code>/api/auth/login-store-admin</code>). A loja é identificada pela conta.
+      </p>
+      <form id="form">
+        <div>
+          <label for="api">API (HTTPS)</label>
+          <input id="api" type="url" placeholder="https://api.exemplo.com" required autocomplete="off" />
+        </div>
+        <div>
+          <label for="phone">Telefone (WhatsApp)</label>
+          <input id="phone" type="tel" inputmode="tel" placeholder="11999999999" required autocomplete="tel" />
+        </div>
+        <div>
+          <label for="pass">Senha</label>
+          <input id="pass" type="password" required autocomplete="current-password" />
+        </div>
+        <p class="errbox" id="formErr"></p>
+        <button type="submit" class="primary" id="submitBtn">Entrar</button>
+      </form>
+    </main>
+    <script src="setup.js"></script>
+  </body>
+</html>

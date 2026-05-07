@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mira Printer Agent</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <header class="top">
+        <h1><span class="brand-dot">M</span>iraDelivery</h1>
+        <span id="conn" class="badge">—</span>
+      </header>
+
+      <div class="layout">
+        <section class="card left-col">
+          <h2 class="section-title">Loja</h2>
+          <p class="store-name" id="storeName">—</p>
+          <p class="row">
+            <span class="label">Último pedido impresso</span>
+            <span id="last" class="value">—</span>
+          </p>
+          <p class="row err" id="errRow" hidden>
+            <span class="label">Erro</span>
+            <span id="err" class="value"></span>
+          </p>
+          <label class="check">
+            <input type="checkbox" id="login" />
+            Abrir ao iniciar sessão (Windows)
+          </label>
+          <p class="actions">
+            <button type="button" id="btnSetup">Alterar conta</button>
+            <button type="button" id="btnLogout" class="secondary">Desconectar</button>
+          </p>
+        </section>
+
+        <section class="card right-col print-box">
+          <h2 class="section-title">Impressoras</h2>
+          <label class="field">
+            Tipo
+            <select id="printerType">
+              <option value="">Padrão do servidor</option>
+              <option value="windows_spooler">Windows spooler</option>
+              <option value="network_escpos">Rede ESC/POS</option>
+              <option value="mock_txt">Mock TXT</option>
+            </select>
+          </label>
+          <label class="field">
+            Impressora / Destino
+            <select id="printerTargetSelect">
+              <option value="">Selecione...</option>
+            </select>
+            <input id="printerTargetInput" placeholder="IP:PORTA ou nome da impressora" />
+          </label>
+          <div class="grid-2">
+            <label class="field">
+              Papel (mm)
+              <select id="paperWidthMm">
+                <option value="58">58</option>
+                <option value="80">80</option>
+              </select>
+            </label>
+            <label class="field">
+              Fonte (ESC/POS)
+              <select id="fontScale">
+                <option value="small">Pequena</option>
+                <option value="normal">Normal</option>
+                <option value="large">Grande</option>
+              </select>
+            </label>
+          </div>
+          <p class="actions">
+            <button type="button" id="btnSavePrint">Salvar impressão</button>
+          </p>
+        </section>
+      </div>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
