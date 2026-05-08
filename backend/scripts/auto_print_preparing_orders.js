@@ -106,6 +106,21 @@ function resolveItemName(item) {
 
 function getItemAdditionalsDetailed(item) {
   const result = [];
+  const resolveAdditionalValue = (additional) => Number(
+    additional?.adicional?.precoNoPedido ??
+    additional?.adicional?.priceAtOrder ??
+    additional?.adicional?.preco ??
+    additional?.adicional?.price ??
+    additional?.adicional?.valor ??
+    additional?.adicional?.value ??
+    additional?.precoNoPedido ??
+    additional?.priceAtOrder ??
+    additional?.preco ??
+    additional?.price ??
+    additional?.valor ??
+    additional?.value ??
+    0
+  );
   const pushAdditional = (qtyRaw, nameRaw, valueRaw) => {
     const name = firstNonEmpty(nameRaw, 'Adicional');
     const qty = Number(qtyRaw || 1);
@@ -118,7 +133,7 @@ function getItemAdditionalsDetailed(item) {
     pushAdditional(
       a?.quantidade,
       firstNonEmpty(a?.adicional?.nome, a?.adicional?.name, a?.nome, a?.name),
-      a?.adicional?.preco ?? a?.preco
+      resolveAdditionalValue(a)
     );
   });
 
@@ -127,7 +142,7 @@ function getItemAdditionalsDetailed(item) {
     pushAdditional(
       a?.quantidade,
       firstNonEmpty(a?.adicional?.nome, a?.adicional?.name, a?.nome, a?.name),
-      a?.adicional?.preco ?? a?.preco
+      resolveAdditionalValue(a)
     );
   });
 
@@ -145,7 +160,7 @@ function getItemAdditionalsDetailed(item) {
     pushAdditional(
       a?.quantidade ?? a?.quantity ?? 1,
       firstNonEmpty(a?.nome, a?.name, a?.label),
-      a?.preco ?? a?.price ?? 0
+      Number(a?.preco ?? a?.price ?? a?.valor ?? a?.value ?? 0)
     );
   });
 
@@ -291,6 +306,8 @@ const printerTarget = String(localPrinterTarget || printCfg.printerTarget || '')
 const paperWidthMm = Number(localPaperWidth || printCfg.paperWidthMm || 80);
 const receiptWidth = 40;
 
+// ─── Helpers de formatação ───────────────────────────────────────────────────
+
 function padRight(value, width) {
   const s = String(value ?? '');
   if (s.length >= width) return s.slice(0, width);
@@ -301,6 +318,19 @@ function padLeft(value, width) {
   const s = String(value ?? '');
   if (s.length >= width) return s.slice(0, width);
   return ' '.repeat(width - s.length) + s;
+}
+
+function center(text, width) {
+  const s = String(text ?? '').trim();
+  if (s.length >= width) return s.slice(0, width);
+  const totalPad = width - s.length;
+  const left = Math.floor(totalPad / 2);
+  const right = totalPad - left;
+  return ' '.repeat(left) + s + ' '.repeat(right);
+}
+
+function divider(char = '-', width = receiptWidth) {
+  return char.repeat(width);
 }
 
 function wrapText(text, width) {
@@ -360,21 +390,38 @@ function isCustomProduct(item) {
   return !!(snap?.customAcai || snap?.customSorvete || snap?.customProduct);
 }
 
+// ─── Montagem do cupom ───────────────────────────────────────────────────────
+
 const lines = [];
-lines.push(storeName);
+
+// Cabeçalho
+lines.push(divider('='));
+lines.push(center(storeName, receiptWidth));
 const storeAddress = resolveStoreAddress(payload);
-if (storeAddress) lines.push(storeAddress);
-lines.push(`#${payload.dailyNumber || payload.id} ${formatDate(payload.criadoEm || payload.createdAt)}`);
+if (storeAddress) lines.push(center(storeAddress, receiptWidth));
+lines.push(divider('='));
 lines.push('');
-lines.push('-------------- TIPO DE ENTREGA -------------');
-lines.push(formatDeliveryType(deliveryTypeRaw));
+
+// Número e data do pedido
+const orderNumber = `PEDIDO #${payload.dailyNumber || payload.id}`;
+lines.push(center(orderNumber, receiptWidth));
+lines.push(center(formatDate(payload.criadoEm || payload.createdAt), receiptWidth));
+lines.push('');
+
+// Tipo de entrega
+lines.push(center('------------ TIPO DE ENTREGA ------------', receiptWidth));
+
+const deliveryLabel = formatDeliveryType(deliveryTypeRaw);
+lines.push(center(deliveryLabel, receiptWidth));
+
 if (String(deliveryTypeRaw).toLowerCase() === 'delivery') {
+  lines.push('');
   const streetLine = [payload.ruaEntrega, payload.numeroEntrega].filter(Boolean).join(', ');
-  const withComp = [streetLine, payload.complementoEntrega ? `- ${payload.complementoEntrega}` : '']
+  const withComp = [streetLine, payload.complementoEntrega ? `Comp: ${payload.complementoEntrega}` : '']
     .filter(Boolean)
     .join(' ');
   if (withComp) lines.push(withComp);
-  if (payload.bairroEntrega) lines.push(payload.bairroEntrega);
+  if (payload.bairroEntrega) lines.push(`Bairro: ${payload.bairroEntrega}`);
   const deliveryReference = getDeliveryReference(payload);
   if (deliveryReference) lines.push(`Ref.: ${deliveryReference}`);
 }
@@ -384,6 +431,8 @@ if (String(deliveryTypeRaw).toLowerCase() === 'dine_in' && payload.identificador
 if (String(deliveryTypeRaw).toLowerCase() === 'pickup') {
   lines.push('Cliente retira no estabelecimento');
 }
+
+// Dados do cliente
 const clientName = firstNonEmpty(
   payload.nomeClienteAvulso,
   payload.usuario?.nomeUsuario,
@@ -405,6 +454,9 @@ const clientPhone = firstNonEmpty(
 );
 const totalOrders = firstNonEmpty(payload.totalPedidos, payload.usuario?.totalPedidos, payload.user?.totalPedidos);
 const clientEmail = firstNonEmpty(payload.usuario?.email, payload.user?.email, payload.cliente?.email);
+const isCounterUser = ['USUARIO_BALCAO'].includes(
+  String(firstNonEmpty(payload.usuario?.nomeUsuario, payload.usuario?.username, payload.user?.username, '')).trim().toUpperCase()
+);
 const hasClientBlock = !!(
   payload.nomeClienteAvulso ||
   payload.usuario?.nomeUsuario ||
@@ -413,69 +465,103 @@ const hasClientBlock = !!(
   clientPhone ||
   clientEmail
 );
+
 if (hasClientBlock) {
   lines.push('');
-  lines.push('-------------- DADOS DO CLIENTE ------------');
-  lines.push(`Nome: ${clientName}`);
-  if (clientPhone) lines.push(`Numero: ${clientPhone}`);
-  if (clientEmail) lines.push(clientEmail);
-  if (totalOrders) lines.push(`Total de pedidos: ${totalOrders}`);
+  lines.push(center('--------------- CLIENTE ---------------', receiptWidth));
+  lines.push(`Nome   : ${clientName}`);
+  if (clientPhone) lines.push(`Fone   : ${clientPhone}`);
+  if (!isCounterUser && clientEmail) lines.push(`E-mail : ${clientEmail}`);
+  if (totalOrders) lines.push(`Pedidos: ${totalOrders}`);
 }
+
+// Itens
 lines.push('');
-lines.push('-------------- ITENS -------------------');
-lines.push(`${padRight('Descricao', 24)}${padLeft('Qtd', 4)} ${padLeft('Unit.', 10)}${padLeft('Total', 10)}`);
+lines.push(center('---------------- ITENS ----------------', receiptWidth));
+
+// Cabeçalho da tabela de itens
+const descWidth = receiptWidth - 1 - 10 - 10; // 40 - 1 - 10 - 10 = 19
+lines.push(`${padRight('Descricao', descWidth)} ${padLeft('Unit.', 10)}${padLeft('Total', 10)}`);
+lines.push(divider('.'));
+
 if (!items.length) {
-  lines.push('Sem itens no payload');
+  lines.push('  Sem itens no payload');
 } else {
-  items.forEach((item) => {
+  items.forEach((item, idx) => {
     const qty = getItemQty(item);
     const basePrice = getItemBasePrice(item);
     const additionalsTotal = getItemAdditionalsDetailed(item).reduce((acc, a) => acc + a.value * a.qty, 0);
     const unitTotal = basePrice + additionalsTotal;
     const lineTotal = unitTotal * qty;
     const itemName = resolveItemName(item);
-    wrapText(itemName, receiptWidth).forEach((l) => lines.push(l));
-    if (isCustomProduct(item)) lines.push('Personalizado');
+
+    // Linha principal do item: "2x Produto" + valores
+    const itemTitle = `${qty}x ${itemName}`;
+    const titleLines = wrapText(itemTitle, descWidth);
+    lines.push(`${padRight(titleLines[0] || '', descWidth)} ${padLeft(brl(unitTotal), 10)}${padLeft(brl(lineTotal), 10)}`);
+    titleLines.slice(1).forEach((l) => lines.push(l));
+    if (isCustomProduct(item)) lines.push('  > Personalizado');
+
+    // Sabores, complementos e adicionais com recuo
+    const flavors = parseItemFlavors(item);
     const complements = parseItemComplements(item);
     const additionals = parseItemAdditionals(item);
-    const flavors = parseItemFlavors(item);
-    if (complements) wrapText(`+ ${complements}`, receiptWidth).forEach((l) => lines.push(l));
-    if (additionals) wrapText(`+ ${additionals}`, receiptWidth).forEach((l) => lines.push(l));
-    if (flavors) wrapText(`Sab.: ${flavors}`, receiptWidth).forEach((l) => lines.push(l));
+    if (flavors)      wrapText(`  Sabor: ${flavors}`, receiptWidth).forEach((l) => lines.push(l));
+    if (complements)  wrapText(`  Compl: ${complements}`, receiptWidth).forEach((l) => lines.push(l));
+    if (additionals)  wrapText(`  Adic : ${additionals}`, receiptWidth).forEach((l) => lines.push(l));
+
     const itemObs = extractItemObs(item);
-    if (itemObs) wrapText(`Obs.: ${itemObs}`, receiptWidth).forEach((l) => lines.push(l));
-    lines.push(formatItemRow(qty, unitTotal, lineTotal));
+    if (itemObs) wrapText(`  Obs  : ${itemObs}`, receiptWidth).forEach((l) => lines.push(l));
+
+    // Separador leve entre itens (exceto último)
+    if (idx < items.length - 1) lines.push(divider('.'));
   });
 }
 
+// Observações do pedido
 if (payload.observacoes) {
   lines.push('');
-  lines.push('------------- OBSERVACOES -------------');
-  lines.push(String(payload.observacoes).trim());
+  lines.push(center('-------------- OBSERVACOES --------------', receiptWidth));
+  wrapText(String(payload.observacoes).trim(), receiptWidth).forEach((l) => lines.push(l));
+}
+
+// Pagamento e totais
+lines.push('');
+lines.push(center('-------------- PAGAMENTO --------------', receiptWidth));
+
+lines.push(`Forma   : ${paymentMethod}`);
+
+if (isPixPayment)          lines.push('>>> Pago via PIX - nao cobrar! <<<');
+if (isCashOnDeliveryPayment) lines.push('>>> Dinheiro na entrega - cobrar! <<<');
+if (isCardPayment)         lines.push('>>> Cartao na entrega - cobrar! <<<');
+
+if (isCashOnDeliveryPayment && payload.precisaTroco && payload.valorTroco) {
+  const trocaPara = Number(payload.valorTroco || 0);
+  lines.push(`Pago com: ${brl(trocaPara)}`);
+  lines.push(`Troco   : ${brl(trocaPara - total)}`);
 }
 
 lines.push('');
-lines.push('-------------- PAGAMENTO --------------');
-lines.push(`Forma ${paymentMethod}`);
-if (isPixPayment) lines.push('Pedido ja pago - nao cobrar do cliente.');
-if (isCashOnDeliveryPayment) lines.push('Dinheiro na entrega - Cobrar do cliente!');
-if (isCardPayment) lines.push('Cartao na entrega - Cobrar do cliente!');
-if (isCashOnDeliveryPayment && payload.precisaTroco && payload.valorTroco) {
-  const trocaPara = Number(payload.valorTroco || 0);
-  lines.push(`Paga com: ${brl(trocaPara)}`);
-  lines.push(`Troco: ${brl(trocaPara - total)}`);
-}
-lines.push(`Subtotal ${brl(subtotal)}`);
+lines.push(divider('.'));
+lines.push(`${padRight('Subtotal', receiptWidth - 12)}${padLeft(brl(subtotal), 12)}`);
 if (String(deliveryTypeRaw).toLowerCase() === 'delivery') {
-  lines.push(`Entrega ${brl(deliveryFee)}`);
+  lines.push(`${padRight('Entrega', receiptWidth - 12)}${padLeft(brl(deliveryFee), 12)}`);
 }
-lines.push(`TOTAL ${brl(total)}`);
+lines.push(divider('.'));
+lines.push(`${padRight('TOTAL', receiptWidth - 12)}${padLeft(brl(total), 12)}`);
+lines.push(divider('='));
+
+// Rodapé
 lines.push('');
-lines.push('Obrigado pela preferencia');
-lines.push(storeName);
-lines.push('Powered by MiraDelivery');
-lines.push('Acesse: miradelivery.com.br');
+lines.push(center('Obrigado pela preferencia!', receiptWidth));
+lines.push(center(storeName, receiptWidth));
 lines.push('');
+lines.push(center('Powered by MiraDelivery', receiptWidth));
+lines.push(center('miradelivery.com.br', receiptWidth));
+lines.push('');
+lines.push(divider('='));
+
+// ─── Impressão ───────────────────────────────────────────────────────────────
 
 const content = lines.join('\n');
 
