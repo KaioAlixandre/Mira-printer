@@ -1,13 +1,9 @@
 const form = document.getElementById('form');
-const apiEl = document.getElementById('api');
 const phoneEl = document.getElementById('phone');
 const passEl = document.getElementById('pass');
 const formErr = document.getElementById('formErr');
 const submitBtn = document.getElementById('submitBtn');
-
-window.mira.getSessionInfo().then((h) => {
-  if (h.apiHttpBase) apiEl.value = h.apiHttpBase;
-});
+const FIXED_API_HTTP_BASE = 'http://216.22.5.245:3002';
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -15,7 +11,7 @@ form.addEventListener('submit', async (e) => {
   submitBtn.disabled = true;
   try {
     await window.mira.login({
-      apiHttpBase: apiEl.value.trim(),
+      apiHttpBase: FIXED_API_HTTP_BASE,
       telefone: phoneEl.value.trim(),
       password: passEl.value,
     });

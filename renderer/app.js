@@ -12,6 +12,8 @@ const printerTargetInputEl = document.getElementById('printerTargetInput');
 const paperWidthEl = document.getElementById('paperWidthMm');
 const fontScaleEl = document.getElementById('fontScale');
 const btnSavePrintEl = document.getElementById('btnSavePrint');
+const printBellEnabledEl = document.getElementById('printBellEnabled');
+const printBellVolumeEl = document.getElementById('printBellVolume');
 
 function render(s) {
   const c = s.connection || '—';
@@ -40,7 +42,10 @@ window.mira.getStatus().then((s) => render(s));
 refreshStoreInfo();
 loadPrintSettings();
 
-const off = window.mira.onStatus((s) => render(s));
+const off = window.mira.onStatus((s) => {
+  render(s);
+  refreshStoreInfo();
+});
 window.addEventListener('beforeunload', () => off());
 
 loginEl.addEventListener('change', () => {
@@ -67,6 +72,13 @@ function fillPrinters(printers) {
   });
 }
 
+function syncPrintBellControls() {
+  const on = printBellEnabledEl.checked;
+  printBellVolumeEl.disabled = !on;
+}
+
+printBellEnabledEl.addEventListener('change', syncPrintBellControls);
+
 async function loadPrintSettings() {
   const { settings, printers } = await window.mira.getPrintSettings();
   fillPrinters(printers);
@@ -77,6 +89,10 @@ async function loadPrintSettings() {
   if (settings.printerTarget) {
     printerTargetSelectEl.value = settings.printerTarget;
   }
+  printBellEnabledEl.checked = settings.printBellEnabled !== false;
+  const pct = Math.round((settings.printBellVolume ?? 0.88) * 100);
+  printBellVolumeEl.value = String(Math.min(100, Math.max(0, pct)));
+  syncPrintBellControls();
 }
 
 printerTargetSelectEl.addEventListener('change', () => {
@@ -91,5 +107,7 @@ btnSavePrintEl.addEventListener('click', async () => {
     printerTarget: printerTargetInputEl.value.trim(),
     paperWidthMm: Number(paperWidthEl.value || 80),
     fontScale: fontScaleEl.value,
+    printBellEnabled: printBellEnabledEl.checked,
+    printBellVolume: Number(printBellVolumeEl.value || 0) / 100,
   });
 });

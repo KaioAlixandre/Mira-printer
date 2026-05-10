@@ -33,22 +33,34 @@ function loadPrintSettings() {
       printerTarget: '',
       paperWidthMm: 80,
       fontScale: 'normal',
+      printBellEnabled: true,
+      printBellVolume: 0.88,
     };
   }
+  const bellVolRaw = Number(raw.printBellVolume);
+  const bellVol = Number.isFinite(bellVolRaw)
+    ? Math.min(1, Math.max(0, bellVolRaw))
+    : 0.88;
   return {
     printerType: String(raw.printerType || ''),
     printerTarget: String(raw.printerTarget || ''),
     paperWidthMm: Number(raw.paperWidthMm || 80),
     fontScale: String(raw.fontScale || 'normal'),
+    printBellEnabled: raw.printBellEnabled !== false,
+    printBellVolume: bellVol,
   };
 }
 
 function savePrintSettings(settings) {
+  const volIn = Number(settings?.printBellVolume);
+  const bellVol = Number.isFinite(volIn) ? Math.min(1, Math.max(0, volIn)) : 0.88;
   const next = {
     printerType: String(settings?.printerType || ''),
     printerTarget: String(settings?.printerTarget || ''),
     paperWidthMm: Number(settings?.paperWidthMm || 80),
     fontScale: String(settings?.fontScale || 'normal'),
+    printBellEnabled: settings?.printBellEnabled !== false,
+    printBellVolume: bellVol,
   };
   fs.writeFileSync(getPrintSettingsPath(), JSON.stringify(next), 'utf8');
   return next;
@@ -232,8 +244,19 @@ function extractLojaIdFromPayload(payload) {
 
 function normalizePayloadForScript(payload, kind) {
   const base = orderDataFromPayload(payload);
-  if (base && typeof base === 'object' && !base._printKind) {
-    return { ...base, _printKind: kind, _source: 'mira-printer-agent' };
+  if (base && typeof base === 'object') {
+    const normalizedId =
+      base.id ??
+      base.orderId ??
+      base.pedidoId ??
+      base.pedido?.id ??
+      null;
+    return {
+      ...base,
+      id: normalizedId,
+      _printKind: kind,
+      _source: 'mira-printer-agent',
+    };
   }
   return base;
 }
@@ -312,6 +335,23 @@ function broadcastStatus() {
   }
 }
 
+function broadcastPrintBell() {
+  const s = loadPrintSettings();
+  if (s.printBellEnabled === false) return;
+  const vol =
+    typeof s.printBellVolume === 'number' && Number.isFinite(s.printBellVolume)
+      ? Math.min(1, Math.max(0, s.printBellVolume))
+      : 0.88;
+  if (vol <= 0) return;
+  windows.forEach((w) => {
+    if (!w.isDestroyed()) {
+      try {
+        w.webContents.send('print-bell', { volume: vol });
+      } catch (_) {}
+    }
+  });
+}
+
 function setConnection(state) {
   lastStatus.connection = state;
   broadcastStatus();
@@ -328,7 +368,9 @@ function setLastError(msg) {
 }
 
 function runPrintScript(mergedEnv, scriptPath, payload, useElectronAsNode, done) {
+  broadcastPrintBell();
   const printSettings = loadPrintSettings();
+  const userDataPath = app.getPath('userData');
   const env = {
     ...mergedEnv,
     AUTO_PRINT_ORDER_JSON: JSON.stringify(payload),
@@ -336,6 +378,8 @@ function runPrintScript(mergedEnv, scriptPath, payload, useElectronAsNode, done)
     MIRA_PRINTER_TARGET: printSettings.printerTarget || '',
     MIRA_PAPER_WIDTH_MM: String(printSettings.paperWidthMm || 80),
     MIRA_FONT_SCALE: printSettings.fontScale || 'normal',
+    MIRA_USER_DATA: userDataPath,
+    MIRA_PRINTS_DIR: path.join(userDataPath, 'prints'),
   };
 
   const logPrefix = `[print ${new Date().toISOString()}]`;
@@ -362,19 +406,31 @@ function runPrintScript(mergedEnv, scriptPath, payload, useElectronAsNode, done)
 
 function attachPrintLogs(child, logPrefix, done) {
   let finished = false;
+  let stderrText = '';
   const finishOnce = () => {
     if (finished) return;
     finished = true;
     if (typeof done === 'function') done();
   };
   child.stdout?.on('data', (d) => process.stdout.write(`${logPrefix} ${d}`));
-  child.stderr?.on('data', (d) => process.stderr.write(`${logPrefix} [err] ${d}`));
+  child.stderr?.on('data', (d) => {
+    const chunk = String(d || '');
+    stderrText += chunk;
+    process.stderr.write(`${logPrefix} [err] ${chunk}`);
+  });
   child.on('error', (err) => {
     console.error(`${logPrefix} spawn error`, err.message);
+    setLastError(`Falha ao iniciar impressão: ${err.message}`);
     finishOnce();
   });
   child.on('close', (code) => {
-    if (code !== 0) console.error(`${logPrefix} exit ${code}`);
+    if (code !== 0) {
+      console.error(`${logPrefix} exit ${code}`);
+      const detail = stderrText.trim() || `Script de impressão finalizou com código ${code}.`;
+      setLastError(detail);
+    } else {
+      setLastError(null);
+    }
     finishOnce();
   });
 }
@@ -548,6 +604,7 @@ function createMainWindow(startHidden) {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
   windows.add(mainWindow);
@@ -621,6 +678,7 @@ function createSetupWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
   setupWindow.loadFile(path.join(__dirname, 'renderer', 'setup.html'));
@@ -712,6 +770,7 @@ function registerIpc() {
       } catch (_) {}
       socket = null;
     }
+    setLastError(null);
     connectSocket(configBundle, token);
 
     if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close();
@@ -735,7 +794,7 @@ function registerIpc() {
       socket = null;
     }
     setConnection('desconectado');
-    setLastError('Faça login novamente.');
+    setLastError(null);
     configBundle = null;
     createSetupWindow();
     return { ok: true };

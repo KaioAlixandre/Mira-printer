@@ -3,77 +3,56 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Configurar — Mira Printer</title>
+    <title>Mira AutoPrint - Login</title>
     <link rel="stylesheet" href="styles.css" />
-    <style>
-      form {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      label {
-        font-size: 0.85rem;
-        opacity: 0.9;
-      }
-      input {
-        width: 100%;
-        padding: 8px 10px;
-        border-radius: 6px;
-        border: 1px solid #444;
-        background: #2d2d2d;
-        color: #eee;
-        font: inherit;
-      }
-      button.primary {
-        margin-top: 8px;
-        padding: 10px;
-        border-radius: 8px;
-        border: none;
-        background: #2e7d32;
-        color: #fff;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      button.primary:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .errbox {
-        color: #ffab91;
-        font-size: 0.85rem;
-        min-height: 1.2em;
-      }
-      .note {
-        font-size: 0.75rem;
-        opacity: 0.65;
-        margin-top: 8px;
-        line-height: 1.4;
-      }
-    </style>
   </head>
   <body>
-    <main>
-      <h1>Login da impressora</h1>
-      <p class="note">
-        Login SaaS: mesmo <strong>telefone</strong> e senha de <strong>admin/master</strong> do painel da loja (<code>/api/auth/login-store-admin</code>). A loja é identificada pela conta.
-      </p>
-      <form id="form">
-        <div>
-          <label for="api">API (HTTPS)</label>
-          <input id="api" type="url" placeholder="https://api.exemplo.com" required autocomplete="off" />
+    <div class="scanline"></div>
+
+    <div class="setup-wrapper">
+      <div class="setup-panel">
+
+        <div class="setup-logo">
+          <h1><span class="brand-dot">M</span>ira<span style="color:var(--red)">Delivery</span></h1>
         </div>
-        <div>
-          <label for="phone">Telefone (WhatsApp)</label>
-          <input id="phone" type="tel" inputmode="tel" placeholder="11999999999" required autocomplete="tel" />
+
+        <p class="setup-subtitle">// autenticação do AutoPrint</p>
+
+        <p class="note">
+          Use o mesmo <strong>telefone</strong> e senha de <strong>admin/master</strong>
+          do painel da loja.
+        </p>
+
+        <div style="height:20px;"></div>
+
+        <div class="setup-form" id="form">
+          <div class="setup-field">
+            <label for="phone">Telefone (WhatsApp)</label>
+            <input id="phone" type="tel" inputmode="tel" placeholder="11999999999" required autocomplete="tel" />
+          </div>
+          <div class="setup-field">
+            <label for="pass">Senha</label>
+            <input id="pass" type="password" required autocomplete="current-password" />
+          </div>
+
+          <p class="errbox" id="formErr"></p>
+
+          <button type="button" class="btn-primary" id="submitBtn">Entrar</button>
         </div>
-        <div>
-          <label for="pass">Senha</label>
-          <input id="pass" type="password" required autocomplete="current-password" />
-        </div>
-        <p class="errbox" id="formErr"></p>
-        <button type="submit" class="primary" id="submitBtn">Entrar</button>
-      </form>
-    </main>
+
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/gh/IonDen/ion.sound@3.0.7/js/ion.sound.min.js"></script>
     <script src="setup.js"></script>
+    <script src="print-bell.js"></script>
+    <script>
+      // Override form submit to use button click (keeps setup.js working)
+      document.getElementById('submitBtn').addEventListener('click', () => {
+        document.getElementById('form').dispatchEvent(
+          Object.assign(new Event('submit'), { preventDefault: () => {} })
+        );
+      });
+    </script>
   </body>
 </html>

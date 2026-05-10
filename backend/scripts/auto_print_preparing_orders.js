@@ -30,7 +30,18 @@ console.log(
   `Pedido #${payload.dailyNumber || payload.id} (id=${payload.id}) pronto para impressão automática.`
 );
 
-const printsDir = path.resolve(__dirname, '..', 'prints');
+function resolveWritablePrintsDir() {
+  const envDir = String(process.env.MIRA_PRINTS_DIR || '').trim();
+  if (envDir) return envDir;
+
+  const userData = String(process.env.MIRA_USER_DATA || '').trim();
+  if (userData) return path.join(userData, 'prints');
+
+  // Fallback para desenvolvimento local (fora de app.asar).
+  return path.resolve(__dirname, '..', 'prints');
+}
+
+const printsDir = resolveWritablePrintsDir();
 if (!fs.existsSync(printsDir)) {
   fs.mkdirSync(printsDir, { recursive: true });
 }
@@ -304,7 +315,14 @@ const fontScale = String(process.env.MIRA_FONT_SCALE || 'normal').toLowerCase();
 const printerType = String(localPrinterType || printCfg.printerType || 'mock_txt').toLowerCase();
 const printerTarget = String(localPrinterTarget || printCfg.printerTarget || '').trim();
 const paperWidthMm = Number(localPaperWidth || printCfg.paperWidthMm || 80);
-const receiptWidth = 40;
+
+function resolveReceiptWidth(widthMm) {
+  const width = Number(widthMm);
+  if (!Number.isFinite(width) || width <= 0) return 48;
+  return width >= 76 ? 48 : 32;
+}
+
+const receiptWidth = resolveReceiptWidth(paperWidthMm);
 
 // ─── Helpers de formatação ───────────────────────────────────────────────────
 
@@ -335,17 +353,27 @@ function divider(char = '-', width = receiptWidth) {
 
 function wrapText(text, width) {
   const clean = String(text || '').trim();
-  if (!clean) return [];
+  if (!clean || width < 1) return [];
   const words = clean.split(/\s+/);
   const out = [];
   let line = '';
   words.forEach((word) => {
-    const next = line ? `${line} ${word}` : word;
+    let chunk = word;
+    while (chunk.length > width) {
+      if (line) {
+        out.push(line);
+        line = '';
+      }
+      out.push(chunk.slice(0, width));
+      chunk = chunk.slice(width);
+    }
+    if (!chunk) return;
+    const next = line ? `${line} ${chunk}` : chunk;
     if (next.length <= width) {
       line = next;
     } else {
       if (line) out.push(line);
-      line = word;
+      line = chunk;
     }
   });
   if (line) out.push(line);
@@ -420,16 +448,16 @@ if (String(deliveryTypeRaw).toLowerCase() === 'delivery') {
   const withComp = [streetLine, payload.complementoEntrega ? `Comp: ${payload.complementoEntrega}` : '']
     .filter(Boolean)
     .join(' ');
-  if (withComp) lines.push(withComp);
-  if (payload.bairroEntrega) lines.push(`Bairro: ${payload.bairroEntrega}`);
+  if (withComp) wrapText(withComp, receiptWidth).forEach((l) => lines.push(l));
+  if (payload.bairroEntrega) wrapText(`Bairro: ${payload.bairroEntrega}`, receiptWidth).forEach((l) => lines.push(l));
   const deliveryReference = getDeliveryReference(payload);
-  if (deliveryReference) lines.push(`Ref.: ${deliveryReference}`);
+  if (deliveryReference) wrapText(`Ref.: ${deliveryReference}`, receiptWidth).forEach((l) => lines.push(l));
 }
 if (String(deliveryTypeRaw).toLowerCase() === 'dine_in' && payload.identificadorMesaSenha) {
-  lines.push(`Mesa: ${payload.identificadorMesaSenha}`);
+  wrapText(`Mesa: ${payload.identificadorMesaSenha}`, receiptWidth).forEach((l) => lines.push(l));
 }
 if (String(deliveryTypeRaw).toLowerCase() === 'pickup') {
-  lines.push('Cliente retira no estabelecimento');
+  wrapText('Cliente retira no estabelecimento', receiptWidth).forEach((l) => lines.push(l));
 }
 
 // Dados do cliente
@@ -480,7 +508,7 @@ lines.push('');
 lines.push(center('---------------- ITENS ----------------', receiptWidth));
 
 // Cabeçalho da tabela de itens
-const descWidth = receiptWidth - 1 - 10 - 10; // 40 - 1 - 10 - 10 = 19
+const descWidth = receiptWidth - 1 - 10 - 10;
 lines.push(`${padRight('Descricao', descWidth)} ${padLeft('Unit.', 10)}${padLeft('Total', 10)}`);
 lines.push(divider('.'));
 

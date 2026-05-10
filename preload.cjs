@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld('mira', {
     ipcRenderer.on('status', handler);
     return () => ipcRenderer.removeListener('status', handler);
   },
+  onPrintBell: (fn) => {
+    const handler = (_e, opts) => fn(opts ?? {});
+    ipcRenderer.on('print-bell', handler);
+    return () => ipcRenderer.removeListener('print-bell', handler);
+  },
   setOpenAtLogin: (v) => ipcRenderer.send('set-open-at-login', v),
   showWindow: () => ipcRenderer.send('show-window'),
   openSetup: () => ipcRenderer.send('open-setup'),
