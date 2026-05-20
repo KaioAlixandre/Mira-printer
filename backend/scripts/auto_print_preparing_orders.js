@@ -10,6 +10,16 @@ const net = require('net');
 const { spawn } = require('child_process');
 
 function parsePayload() {
+  const filePath = String(process.env.AUTO_PRINT_ORDER_JSON_FILE || '').trim();
+  if (filePath) {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
   const raw = process.env.AUTO_PRINT_ORDER_JSON;
   if (!raw) return null;
   try {
@@ -84,7 +94,7 @@ function formatDeliveryType(type) {
 function firstNonEmpty(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
-    const text = String(value).trim();
+    const text = String(value).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
     if (text) return text;
   }
   return '';
@@ -104,13 +114,24 @@ function parseOptionsSnapshot(raw) {
 }
 
 function resolveItemName(item) {
+  const snap = parseOptionsSnapshot(item?.opcoesSelecionadas || item?.opcoesSelecionadasSnapshot);
   return firstNonEmpty(
     item?.produto?.nome,
     item?.produto?.name,
+    item?.product?.nome,
+    item?.product?.name,
     item?.nomeProduto,
     item?.produtoNome,
     item?.nome,
     item?.name,
+    snap?.nomeProduto,
+    snap?.productName,
+    snap?.customAcai?.title,
+    snap?.customAcai?.label,
+    snap?.customProduct?.title,
+    snap?.customProduct?.label,
+    snap?.customSorvete?.title,
+    snap?.customSorvete?.label,
     'Produto'
   );
 }
@@ -460,31 +481,54 @@ if (String(deliveryTypeRaw).toLowerCase() === 'pickup') {
   wrapText('Cliente retira no estabelecimento', receiptWidth).forEach((l) => lines.push(l));
 }
 
-// Dados do cliente
-const clientName = firstNonEmpty(
-  payload.nomeClienteAvulso,
-  payload.usuario?.nomeUsuario,
-  payload.usuario?.nome,
-  payload.usuario?.username,
-  payload.user?.nome,
-  payload.user?.username,
-  payload.cliente?.nome,
-  payload.customer?.name,
-  '-'
-);
-const clientPhone = firstNonEmpty(
-  payload.usuario?.telefone,
-  payload.user?.phone,
-  payload.telefoneEntrega,
-  payload.shippingPhone,
-  payload.cliente?.telefone,
-  payload.customer?.phone
-);
-const totalOrders = firstNonEmpty(payload.totalPedidos, payload.usuario?.totalPedidos, payload.user?.totalPedidos);
-const clientEmail = firstNonEmpty(payload.usuario?.email, payload.user?.email, payload.cliente?.email);
+// PDV usa `usuario` = USUARIO_BALCAO: não exibir esse login como nome do cliente.
 const isCounterUser = ['USUARIO_BALCAO'].includes(
   String(firstNonEmpty(payload.usuario?.nomeUsuario, payload.usuario?.username, payload.user?.username, '')).trim().toUpperCase()
 );
+function skipCounterPlaceholderName(value) {
+  const t = String(value || '').trim();
+  if (!t) return '';
+  if (t.toUpperCase() === 'USUARIO_BALCAO') return '';
+  return t;
+}
+
+// Dados do cliente (PDV: telefone do pedido antes do usuário balcão)
+const clientPhone = isCounterUser
+  ? firstNonEmpty(
+      payload.telefoneEntrega,
+      payload.shippingPhone,
+      payload.usuario?.telefone,
+      payload.user?.phone,
+      payload.cliente?.telefone,
+      payload.customer?.phone
+    )
+  : firstNonEmpty(
+      payload.usuario?.telefone,
+      payload.user?.phone,
+      payload.telefoneEntrega,
+      payload.shippingPhone,
+      payload.cliente?.telefone,
+      payload.customer?.phone
+    );
+const clientEmail = firstNonEmpty(payload.usuario?.email, payload.user?.email, payload.cliente?.email);
+let clientName = firstNonEmpty(
+  payload.nomeClienteAvulso,
+  skipCounterPlaceholderName(payload.usuario?.nomeUsuario),
+  skipCounterPlaceholderName(payload.usuario?.nome),
+  skipCounterPlaceholderName(payload.usuario?.username),
+  payload.user?.nome,
+  payload.user?.username,
+  payload.cliente?.nome,
+  payload.customer?.name
+);
+if (!clientName) {
+  clientName = firstNonEmpty(
+    clientEmail ? clientEmail.split('@')[0] : '',
+    clientPhone ? `Cliente (${String(clientPhone).replace(/\D/g, '').slice(-4) || clientPhone})` : '',
+    '-'
+  );
+}
+const totalOrders = firstNonEmpty(payload.totalPedidos, payload.usuario?.totalPedidos, payload.user?.totalPedidos);
 const hasClientBlock = !!(
   payload.nomeClienteAvulso ||
   payload.usuario?.nomeUsuario ||
@@ -547,10 +591,11 @@ if (!items.length) {
 }
 
 // Observações do pedido
-if (payload.observacoes) {
+const orderNotes = firstNonEmpty(payload.observacoes, payload.notes);
+if (orderNotes) {
   lines.push('');
   lines.push(center('-------------- OBSERVACOES --------------', receiptWidth));
-  wrapText(String(payload.observacoes).trim(), receiptWidth).forEach((l) => lines.push(l));
+  wrapText(orderNotes, receiptWidth).forEach((l) => lines.push(l));
 }
 
 // Pagamento e totais
@@ -675,10 +720,14 @@ async function main() {
 
     const b64Content = Buffer.from(content, 'utf8').toString('base64');
     const b64Printer = Buffer.from(printerTarget, 'utf8').toString('base64');
+    const b64FontScale = Buffer.from(fontScale, 'utf8').toString('base64');
 
     const psScript = `$ErrorActionPreference = 'Stop'
 $content = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64Content}'))
 $wanted = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64Printer}'))
+$fontScale = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64FontScale}'))
+$receiptWidth = ${receiptWidth}
+$paperWidthMm = ${paperWidthMm}
 function Resolve-MiraPrinter([string]$name) {
   $all = @(Get-Printer | Select-Object -ExpandProperty Name)
   if ($all -contains $name) { return $name }
@@ -697,7 +746,89 @@ if (-not $printerName) {
   Write-Error ("Impressora nao encontrada. Configurado: " + $wanted + ". Instaladas: " + $available)
   exit 2
 }
-$content | Out-Printer -Name $printerName
+Add-Type -AssemblyName System.Drawing
+
+function New-MiraMonoFont([float]$size) {
+  try {
+    return New-Object System.Drawing.Font('Consolas', $size, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+  } catch {
+    return New-Object System.Drawing.Font([System.Drawing.FontFamily]::GenericMonospace, $size, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+  }
+}
+
+function Resolve-MiraFont([System.Drawing.Graphics]$graphics, [float]$maxWidth, [int]$cols, [string]$scale) {
+  $size = 8.0
+  if ($scale -eq 'small') { $size = 7.0 }
+  if ($scale -eq 'large') { $size = 10.0 }
+
+  # GenericTypographic: medicao alinhada ao DrawString sem padding extra do GDI;
+  # sem isso a fonte passa de ~1 coluna na largura util e a borda direita corta o ultimo caractere (ex.: "Total" -> "Tota").
+  $sf = [System.Drawing.StringFormat]::GenericTypographic
+  $sample = 'W' * [Math]::Max(1, $cols)
+  while ($size -gt 4.5) {
+    $font = New-MiraMonoFont $size
+    $measured = $graphics.MeasureString($sample, $font, 4096, $sf).Width
+    if ($measured -le $maxWidth) { return $font }
+    $font.Dispose()
+    $size = $size - 0.25
+  }
+
+  return New-MiraMonoFont $size
+}
+
+$script:miraLines = $content -split '\\r?\\n'
+$script:miraLineIndex = 0
+$script:miraFont = $null
+$script:miraReceiptWidth = [Math]::Max(1, $receiptWidth)
+$script:miraFontScale = $fontScale
+
+$doc = New-Object System.Drawing.Printing.PrintDocument
+$doc.PrinterSettings.PrinterName = $printerName
+$doc.DocumentName = 'Mira Pedido'
+$doc.OriginAtMargins = $false
+$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
+if ($paperWidthMm -gt 0) {
+  $paperWidth = [int][Math]::Round(($paperWidthMm / 25.4) * 100)
+  $doc.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize('Mira Roll', $paperWidth, 1200)
+}
+
+$doc.add_PrintPage({
+  param($sender, $event)
+
+  $printable = $event.PageSettings.PrintableArea
+  $maxWidth = $printable.Width
+  if ($maxWidth -le 0) { $maxWidth = $event.PageBounds.Width }
+
+  if ($script:miraFont -eq $null) {
+    # Margem fisica da impressora + pequena diferenca PrintableArea vs largura real: evita clip na ultima coluna.
+    $usableWidth = [float]([Math]::Max(1, $maxWidth) * 0.97)
+    $script:miraFont = Resolve-MiraFont $event.Graphics $usableWidth $script:miraReceiptWidth $script:miraFontScale
+  }
+
+  $x = [Math]::Max(0, $printable.Left)
+  $y = [Math]::Max(0, $printable.Top)
+  $maxY = $printable.Bottom
+  if ($maxY -le 0) { $maxY = $event.PageBounds.Bottom }
+  $lineHeight = $script:miraFont.GetHeight($event.Graphics)
+  $drawSf = [System.Drawing.StringFormat]::GenericTypographic
+
+  while ($script:miraLineIndex -lt $script:miraLines.Length) {
+    if (($y + $lineHeight) -gt $maxY) {
+      $event.HasMorePages = $true
+      return
+    }
+
+    $event.Graphics.DrawString($script:miraLines[$script:miraLineIndex], $script:miraFont, [System.Drawing.Brushes]::Black, $x, $y, $drawSf)
+    $y = $y + $lineHeight
+    $script:miraLineIndex = $script:miraLineIndex + 1
+  }
+
+  $event.HasMorePages = $false
+})
+
+$doc.Print()
+if ($script:miraFont -ne $null) { $script:miraFont.Dispose() }
+$doc.Dispose()
 `;
 
     const tmpPs1 = path.join(os.tmpdir(), `mira-auto-print-${process.pid}-${Date.now()}.ps1`);

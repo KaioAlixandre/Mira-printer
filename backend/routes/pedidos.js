@@ -829,10 +829,49 @@ router.post('/', authenticateToken, async (req, res) => {
                     }
                 });
 
+                if (!pedidoCompleto) {
+                    console.error('❌ Pedido completo não encontrado após criação; notificação/impressão ignorada.');
+                } else {
                 console.log('👨‍🍳 Notificando todos os cozinheiros ativos');
                 pedidoCompleto.dailyNumber = dailyNumber;
+
+                // Cupom / AUTO_PRINT: o carrinho ainda tem `produto` em memória após a transação;
+                // mescla com o pedido para não perder nome do item no JSON da impressão.
+                const pickTrim = (...vals) => {
+                    for (const v of vals) {
+                        if (v === null || v === undefined) continue;
+                        const t = String(v).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+                        if (t) return t;
+                    }
+                    return '';
+                };
+                const cartProductById = new Map(
+                    (cart?.itens || []).map((ci) => [ci.produtoId, ci.produto])
+                );
+                pedidoCompleto.usuario = {
+                    id: pedidoCompleto.usuario?.id ?? userData?.id,
+                    nomeUsuario:
+                        pickTrim(pedidoCompleto.usuario?.nomeUsuario, userData?.nomeUsuario) || 'Cliente',
+                    email: pickTrim(pedidoCompleto.usuario?.email, userData?.email) || null,
+                    telefone: pickTrim(
+                        pedidoCompleto.usuario?.telefone,
+                        userData?.telefone,
+                        pedidoCompleto.telefoneEntrega
+                    ) || null,
+                    funcao: pedidoCompleto.usuario?.funcao ?? userData?.funcao,
+                };
+                pedidoCompleto.itens_pedido = (pedidoCompleto.itens_pedido || []).map((ip) => {
+                    const fromCart = cartProductById.get(ip.produtoId);
+                    const mergedProduto =
+                        ip.produto && pickTrim(ip.produto.nome)
+                            ? ip.produto
+                            : fromCart || ip.produto || null;
+                    return { ...ip, produto: mergedProduto };
+                });
+
                 await sendCookNotification(pedidoCompleto);
                 triggerAutoPrint(pedidoCompleto, 'order_created_as_being_prepared');
+                }
             } catch (err) {
                 console.error('❌ Erro ao notificar cozinheiros:', err);
             }
