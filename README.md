@@ -54,8 +54,21 @@ Se o token JWT expirar ou o servidor recusar o handshake (`TOKEN_EXPIRED`, papel
 | `USE_ELECTRON_AS_NODE` | `1` (padrão) usa o executável Electron como Node |
 | `START_MINIMIZED` | `1` inicia só na bandeja |
 | `OPEN_AT_LOGIN` | `1` abre ao iniciar sessão no Windows |
+| `PRINT_WS_ENABLED` | `1` (padrão) inicia servidor WebSocket local para o botão **Imprimir** do painel |
+| `PRINT_WS_PORT` | Porta local (padrão `8787`) |
+| `PRINT_WS_HOST` | Host de escuta (padrão `127.0.0.1`) |
 
 `API_HTTP_BASE` pode ser sobrescrito por arquivo de configuração; a sessão gravada no login prevalece para URL + loja.
+
+## Impressão manual (WebSocket do painel)
+
+Com o agente aberto, o painel admin pode enviar pedidos pelo botão **Imprimir** via WebSocket:
+
+- URL padrão no frontend: `VITE_PRINT_WS_URL=ws://localhost:8787`
+- Mensagem: `{ "type": "print_order", "version": 1, "order": { ... }, "user": { ... }, "flavors": [ ... ] }`
+- Resposta: `{ "type": "print_ack", "orderId": <id>, "ok": true }` ou `ok: false` com `error`
+
+O agente converte o objeto `order` do painel e executa o mesmo script de cupom usado na impressão automática.
 
 ## Desenvolvimento
 

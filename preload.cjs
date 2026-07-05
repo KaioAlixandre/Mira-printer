@@ -20,4 +20,6 @@ contextBridge.exposeInMainWorld('mira', {
   setOpenAtLogin: (v) => ipcRenderer.send('set-open-at-login', v),
   showWindow: () => ipcRenderer.send('show-window'),
   openSetup: () => ipcRenderer.send('open-setup'),
+  minimizeWindow: () => ipcRenderer.send('window-minimize'),
+  closeWindow: () => ipcRenderer.send('window-close'),
 });

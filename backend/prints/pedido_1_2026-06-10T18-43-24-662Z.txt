@@ -1,0 +1,45 @@
+==========================
+      MIRA DELIVERY       
+  Rua Teste, 100, Centro  
+==========================
+
+        PEDIDO #42        
+   10/06/2026, 18:00:00   
+
+-------- ENTREGA ---------
+         Entrega          
+
+Av Cliente, 50
+Bairro: Jardim
+
+-------- CLIENTE ---------
+Nome   : Joao
+Fone   : 11999999999
+
+--------- ITENS ----------
+..........................
+2x Acai 500ml
+  Un: R$ 20,00  Tot: R$ 40,00
+Sabor: Morango
+..........................
+1x Agua Mineral
+  Un: R$ 7,90  Tot: R$ 7,90
+
+------- PAGAMENTO --------
+Forma   : PIX
+>>> Pago via PIX - nao cobrar! <<<
+
+..........................
+Subtotal          R$ 47,90
+Entrega            R$ 8,00
+..........................
+TOTAL             R$ 55,90
+==========================
+
+Obrigado pela preferencia!
+      MIRA DELIVERY       
+
+ Powered by MiraDelivery  
+   miradelivery.com.br    
+
+==========================

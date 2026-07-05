@@ -1,0 +1,34 @@
+========================================
+             MIRA DELIVERY              
+========================================
+
+               PEDIDO #42               
+                   -                    
+
+------------ TIPO DE ENTREGA -----------
+                   -                    
+
+---------------- ITENS ---------------- 
+2x Pizza Grande
+  Un: R$ 25,00   Tot: R$ 50,00
+  Sabor: Calabresa, Mussarela
+  Compl: Borda recheada
+  Adic : 1x Bacon (+R$ 5,00)
+
+-------------- PAGAMENTO -------------- 
+Forma   : PIX
+>>> Pago via PIX - nao cobrar! <<<
+
+........................................
+Subtotal                        R$ 50,00
+........................................
+TOTAL                           R$ 50,00
+========================================
+
+       Obrigado pela preferencia!       
+             MIRA DELIVERY              
+
+        Powered by MiraDelivery         
+          miradelivery.com.br           
+
+========================================

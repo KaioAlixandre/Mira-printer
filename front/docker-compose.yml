@@ -1,0 +1,71 @@
+services:
+  # Banco de Dados MySQL
+  db:
+    image: mysql:8.0
+    container_name: miradelivery-db
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: "0000"
+      MYSQL_DATABASE: miradelivery_db
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - miradelivery-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: miradelivery-backend
+    restart: always
+    env_file:
+      - ./backend/.env
+    ports:
+      - "3002:3001"
+    environment:
+      DATABASE_URL: "mysql://root:0000@db:3306/miradelivery_db"
+      JWT_SECRET: ${JWT_SECRET}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD}
+      NODE_ENV: production
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      CARDAPIO_LINK: ${CARDAPIO_LINK:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - miradelivery-network
+    # volumes removidos pois imagens agora vão para o Cloudinary
+
+  # Frontend React (VITE_API_URL vazio = API no mesmo domínio via nginx)
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+    container_name: miradelivery-frontend
+    restart: always
+    ports:
+      - "82:80"
+    depends_on:
+      - backend
+    networks:
+      - miradelivery-network
+
+networks:
+  miradelivery-network:
+    driver: bridge
+
+volumes:
+  mysql_data:

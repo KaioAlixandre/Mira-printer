@@ -1,6 +1,6 @@
 {
   "name": "mira-printer-agent",
-  "version": "1.1.1",
+  "version": "1.1.8",
   "description": "Agente Electron de impressão automática (Socket.IO + spawn script)",
   "main": "main.cjs",
   "author": "",
@@ -15,7 +15,8 @@
   "dependencies": {
     "dotenv": "^16.4.7",
     "electron-updater": "^6.8.3",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "electron": "^33.2.1",
@@ -30,6 +31,7 @@
     },
     "files": [
       "main.cjs",
+      "print-ws-server.cjs",
       "auth-session.cjs",
       "preload.cjs",
       "renderer/**/*",

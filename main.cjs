@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const { io } = require('socket.io-client');
 const { autoUpdater } = require('electron-updater');
 const { loadSession, saveSession, clearSession } = require('./auth-session.cjs');
+const { createPrintWsServer } = require('./print-ws-server.cjs');
 
 function loadDevEnv() {
   try {
@@ -29,7 +30,7 @@ function loadPrintSettings() {
   const raw = readJsonSafe(getPrintSettingsPath());
   if (!raw || typeof raw !== 'object') {
     return {
-      printerType: '',
+      printerType: 'windows_spooler',
       printerTarget: '',
       paperWidthMm: 80,
       fontScale: 'normal',
@@ -42,7 +43,7 @@ function loadPrintSettings() {
     ? Math.min(1, Math.max(0, bellVolRaw))
     : 0.88;
   return {
-    printerType: String(raw.printerType || ''),
+    printerType: 'windows_spooler',
     printerTarget: String(raw.printerTarget || ''),
     paperWidthMm: Number(raw.paperWidthMm || 80),
     fontScale: String(raw.fontScale || 'normal'),
@@ -55,7 +56,7 @@ function savePrintSettings(settings) {
   const volIn = Number(settings?.printBellVolume);
   const bellVol = Number.isFinite(volIn) ? Math.min(1, Math.max(0, volIn)) : 0.88;
   const next = {
-    printerType: String(settings?.printerType || ''),
+    printerType: 'windows_spooler',
     printerTarget: String(settings?.printerTarget || ''),
     paperWidthMm: Number(settings?.paperWidthMm || 80),
     fontScale: String(settings?.fontScale || 'normal'),
@@ -98,7 +99,7 @@ function listWindowsPrinters() {
 }
 
 function normalizeApiBase(u) {
-  if (!u || typeof u !== 'string') return 'http://216.22.5.245:3002';
+  if (!u || typeof u !== 'string') return 'http://.22.5216.245:3002';
   let s = u.trim();
   if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
   return s.replace(/\/+$/, '');
@@ -118,6 +119,7 @@ function getConfigPaths() {
     userDataConfig: path.join(userData, 'config.json'),
     userDataEnv: path.join(userData, '.env'),
     dedupFile: path.join(userData, 'print-dedup.json'),
+    bellDedupFile: path.join(userData, 'bell-dedup.json'),
   };
 }
 
@@ -179,6 +181,10 @@ function getSettings(merged, session) {
 
   const useElectronAsNode = (merged.USE_ELECTRON_AS_NODE ?? merged.useElectronAsNode ?? '1') !== '0';
 
+  const printWsPort = Number(merged.PRINT_WS_PORT || merged.printWsPort || 8787);
+  const printWsEnabled = (merged.PRINT_WS_ENABLED ?? merged.printWsEnabled ?? '1') !== '0';
+  const printWsHost = String(merged.PRINT_WS_HOST || merged.printWsHost || '127.0.0.1').trim();
+
   return {
     apiUrl,
     lojaId,
@@ -186,6 +192,9 @@ function getSettings(merged, session) {
     triggers,
     dedupPolicy,
     useElectronAsNode,
+    printWsPort: Number.isFinite(printWsPort) && printWsPort > 0 ? printWsPort : 8787,
+    printWsEnabled,
+    printWsHost: printWsHost || '127.0.0.1',
   };
 }
 
@@ -310,7 +319,9 @@ let setupWindow = null;
 let tray = null;
 let socket = null;
 let dedupStore = null;
+let bellDedupStore = null;
 let configBundle = null;
+let printWsServer = null;
 const lastStatus = { connection: 'desconectado', lastPrint: null, lastError: null };
 const printQueue = [];
 let isPrinting = false;
@@ -367,14 +378,198 @@ function setLastError(msg) {
   broadcastStatus();
 }
 
+function getPrintBundle() {
+  if (configBundle) return configBundle;
+  const { merged, paths } = loadMergedConfig();
+  return buildConfig(null, merged, paths);
+}
+
+function getSessionStoreName() {
+  try {
+    const sess = loadSession(app.getPath('userData'));
+    const name = sess?.lojaNome;
+    return name && String(name).trim() ? String(name).trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+/** Painel admin envia shipping*; script de cupom usa ruaEntrega, numeroEntrega, etc. */
+function normalizeDeliveryAddressFields(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+
+  const pick = (...vals) => {
+    for (const v of vals) {
+      if (v === null || v === undefined) continue;
+      const t = String(v).trim();
+      if (t) return t;
+    }
+    return '';
+  };
+
+  const rua = pick(payload.ruaEntrega, payload.shippingStreet, payload.deliveryStreet, payload.street);
+  const numero = pick(payload.numeroEntrega, payload.shippingNumber, payload.deliveryNumber, payload.number);
+  const complemento = pick(
+    payload.complementoEntrega,
+    payload.shippingComplement,
+    payload.deliveryComplement,
+    payload.complement
+  );
+  const bairro = pick(
+    payload.bairroEntrega,
+    payload.shippingNeighborhood,
+    payload.deliveryNeighborhood,
+    payload.neighborhood
+  );
+  const referencia = pick(payload.referenciaEntrega, payload.shippingReference, payload.deliveryReference);
+  const telefone = pick(payload.telefoneEntrega, payload.shippingPhone, payload.deliveryPhone);
+
+  if (rua) payload.ruaEntrega = rua;
+  if (numero) payload.numeroEntrega = numero;
+  if (complemento) payload.complementoEntrega = complemento;
+  if (bairro) payload.bairroEntrega = bairro;
+  if (referencia) payload.referenciaEntrega = referencia;
+  if (telefone) payload.telefoneEntrega = telefone;
+
+  if (!payload.tipoEntrega && payload.deliveryType) {
+    payload.tipoEntrega = payload.deliveryType;
+  }
+
+  return payload;
+}
+
+function buildPayloadFromPrintOrderMessage(msg, bundle) {
+  const order = msg?.order && typeof msg.order === 'object' ? msg.order : {};
+  const orderId = order.id ?? order.orderId ?? order.pedidoId ?? null;
+
+  let user = order.user || order.usuario;
+  if (msg?.user && typeof msg.user === 'object') {
+    const u = msg.user;
+    const base = user && typeof user === 'object' ? user : {};
+    user = {
+      ...base,
+      username: u.nomeUsuario || base.username,
+      nomeUsuario: u.nomeUsuario || base.nomeUsuario,
+      telefone: u.telefone || base.telefone,
+      phone: u.telefone || base.phone,
+      email: u.email || base.email,
+    };
+  }
+
+  const sessionStoreName = bundle?.session?.lojaNome
+    ? String(bundle.session.lojaNome).trim()
+    : getSessionStoreName();
+  const storeName =
+    (order.loja?.nome && String(order.loja.nome).trim()) ||
+    (order.storeName && String(order.storeName).trim()) ||
+    (order.nomeLoja && String(order.nomeLoja).trim()) ||
+    sessionStoreName ||
+    '';
+
+  const lojaBase = order.loja && typeof order.loja === 'object' ? order.loja : {};
+
+  const payload = {
+    ...order,
+    id: orderId,
+    usuario: user,
+    user,
+    _printKind: 'manual_ws',
+    _source: 'mira-printer-agent-ws',
+  };
+
+  if (storeName) {
+    payload.loja = {
+      ...lojaBase,
+      id: lojaBase.id ?? order.lojaId ?? bundle?.settings?.lojaId,
+      nome: lojaBase.nome || storeName,
+    };
+    payload.storeName = payload.storeName || storeName;
+    payload.nomeLoja = payload.nomeLoja || storeName;
+  }
+
+  if (msg.customerOrderCount != null) {
+    payload.totalPedidos = msg.customerOrderCount;
+  }
+
+  if (Array.isArray(msg.flavors) && msg.flavors.length) {
+    payload.__printFlavors = msg.flavors;
+  }
+
+  normalizeDeliveryAddressFields(payload);
+  return payload;
+}
+
+function enqueuePrintAndWait(bundle, payload) {
+  return new Promise((resolve, reject) => {
+    enqueuePrint(bundle, payload, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+async function handlePrintOrderFromWebSocket(msg) {
+  const bundle = getPrintBundle();
+  const order = msg?.order;
+  if (!order || typeof order !== 'object') {
+    throw new Error('Campo "order" ausente na mensagem');
+  }
+
+  const orderId = order.id ?? order.orderId;
+  if (orderId == null) {
+    throw new Error('Pedido sem id');
+  }
+
+  const { settings } = bundle;
+  if (settings.lojaId > 0) {
+    const orderLoja = Number(order.lojaId ?? order.loja?.id);
+    if (Number.isFinite(orderLoja) && orderLoja !== settings.lojaId) {
+      throw new Error('Pedido pertence a outra loja');
+    }
+  }
+
+  if (!fs.existsSync(settings.scriptPath)) {
+    throw new Error('Script de impressão não encontrado');
+  }
+
+  const toSend = buildPayloadFromPrintOrderMessage(msg, bundle);
+  setLastPrint(`Pedido ${orderId} (impressão manual Web)`);
+  await enqueuePrintAndWait(bundle, toSend);
+}
+
+function startPrintWebSocketServer(settings) {
+  if (!settings.printWsEnabled) {
+    console.log('[print-ws] servidor desabilitado (PRINT_WS_ENABLED=0)');
+    return;
+  }
+
+  if (printWsServer) {
+    try {
+      printWsServer.close();
+    } catch (_) {}
+    printWsServer = null;
+  }
+
+  printWsServer = createPrintWsServer({
+    port: settings.printWsPort,
+    host: settings.printWsHost,
+    onPrintOrder: handlePrintOrderFromWebSocket,
+  });
+}
+
 function runPrintScript(mergedEnv, scriptPath, payload, useElectronAsNode, done) {
-  broadcastPrintBell();
   const printSettings = loadPrintSettings();
   const userDataPath = app.getPath('userData');
+  const sessionStoreName = getSessionStoreName();
+  const envStoreName =
+    String(mergedEnv.STORE_NAME || mergedEnv.storeName || '').trim() ||
+    sessionStoreName ||
+    String(payload?.loja?.nome || payload?.storeName || payload?.nomeLoja || '').trim();
   const env = {
     ...mergedEnv,
     AUTO_PRINT_ORDER_JSON: JSON.stringify(payload),
-    MIRA_PRINTER_TYPE: printSettings.printerType || '',
+    STORE_NAME: envStoreName,
+    MIRA_PRINTER_TYPE: 'windows_spooler',
     MIRA_PRINTER_TARGET: printSettings.printerTarget || '',
     MIRA_PAPER_WIDTH_MM: String(printSettings.paperWidthMm || 80),
     MIRA_FONT_SCALE: printSettings.fontScale || 'normal',
@@ -407,10 +602,10 @@ function runPrintScript(mergedEnv, scriptPath, payload, useElectronAsNode, done)
 function attachPrintLogs(child, logPrefix, done) {
   let finished = false;
   let stderrText = '';
-  const finishOnce = () => {
+  const finishOnce = (err) => {
     if (finished) return;
     finished = true;
-    if (typeof done === 'function') done();
+    if (typeof done === 'function') done(err || null);
   };
   child.stdout?.on('data', (d) => process.stdout.write(`${logPrefix} ${d}`));
   child.stderr?.on('data', (d) => {
@@ -421,17 +616,18 @@ function attachPrintLogs(child, logPrefix, done) {
   child.on('error', (err) => {
     console.error(`${logPrefix} spawn error`, err.message);
     setLastError(`Falha ao iniciar impressão: ${err.message}`);
-    finishOnce();
+    finishOnce(err);
   });
   child.on('close', (code) => {
     if (code !== 0) {
       console.error(`${logPrefix} exit ${code}`);
       const detail = stderrText.trim() || `Script de impressão finalizou com código ${code}.`;
       setLastError(detail);
+      finishOnce(new Error(detail));
     } else {
       setLastError(null);
+      finishOnce(null);
     }
-    finishOnce();
   });
 }
 
@@ -441,14 +637,21 @@ function processPrintQueue(bundle) {
   if (!next) return;
   isPrinting = true;
 
-  runPrintScript(bundle.merged, bundle.settings.scriptPath, next.payload, bundle.settings.useElectronAsNode, () => {
+  runPrintScript(bundle.merged, bundle.settings.scriptPath, next.payload, bundle.settings.useElectronAsNode, (err) => {
+    if (typeof next.onDone === 'function') {
+      try {
+        next.onDone(err);
+      } catch (e) {
+        console.error('[print] onDone error', e);
+      }
+    }
     isPrinting = false;
     processPrintQueue(bundle);
   });
 }
 
-function enqueuePrint(bundle, payload) {
-  printQueue.push({ payload });
+function enqueuePrint(bundle, payload, onDone) {
+  printQueue.push({ payload, onDone: onDone || null });
   processPrintQueue(bundle);
 }
 
@@ -466,7 +669,6 @@ function handleIncomingEvent(bundle, eventName, rawPayload) {
 
   const kind = kindFromSocketEvent(eventName, normalized);
   if (!kind) return;
-  if (!shouldTrigger(kind, settings.triggers)) return;
 
   const payload = normalized && typeof normalized === 'object' ? normalized : {};
   if (!(settings.lojaId > 0)) return;
@@ -478,6 +680,19 @@ function handleIncomingEvent(bundle, eventName, rawPayload) {
   }
 
   const orderId = extractOrderId(payload);
+
+  // Tocar som quando o pedido é gerado, independente do gatilho de impressão.
+  // Dedup separado para não bloquear impressão posterior do mesmo pedido.
+  if (kind === 'new_order' && bellDedupStore) {
+    try {
+      if (!bellDedupStore.isDup(orderId, 'bell')) {
+        bellDedupStore.mark(orderId, 'bell');
+        broadcastPrintBell();
+      }
+    } catch (_) {}
+  }
+
+  if (!shouldTrigger(kind, settings.triggers)) return;
   if (dedupStore.isDup(orderId, kind)) {
     console.log('[dedup] skip', orderId, kind);
     return;
@@ -594,12 +809,36 @@ function createTray() {
   broadcastStatus();
 }
 
+function fitWindowToContent(win, selector) {
+  if (!win || win.isDestroyed()) return;
+  const safeSelector = String(selector || 'body').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  win.webContents
+    .executeJavaScript(
+      `(function () {
+        const el = document.querySelector('${safeSelector}') || document.body;
+        return Math.ceil(el.getBoundingClientRect().height);
+      })()`
+    )
+    .then((contentHeight) => {
+      if (!win || win.isDestroyed() || !Number.isFinite(contentHeight)) return;
+      const [width] = win.getContentSize();
+      const h = Math.max(320, Math.min(720, contentHeight));
+      win.setContentSize(width, h);
+      win.center();
+    })
+    .catch(() => {});
+}
+
 function createMainWindow(startHidden) {
   mainWindow = new BrowserWindow({
-    width: 980,
-    height: 680,
+    width: 920,
+    height: 520,
+    center: true,
     show: !startHidden,
     skipTaskbar: startHidden,
+    frame: false,
+    backgroundColor: '#ffffff',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -609,6 +848,9 @@ function createMainWindow(startHidden) {
   });
   windows.add(mainWindow);
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.webContents.on('did-finish-load', () => {
+    fitWindowToContent(mainWindow, '.app-card');
+  });
 
   mainWindow.on('closed', () => {
     windows.delete(mainWindow);
@@ -672,8 +914,12 @@ function createSetupWindow() {
     return;
   }
   setupWindow = new BrowserWindow({
-    width: 460,
-    height: 560,
+    width: 420,
+    height: 480,
+    center: true,
+    frame: false,
+    backgroundColor: '#ffffff',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -682,6 +928,9 @@ function createSetupWindow() {
     },
   });
   setupWindow.loadFile(path.join(__dirname, 'renderer', 'setup.html'));
+  setupWindow.webContents.on('did-finish-load', () => {
+    fitWindowToContent(setupWindow, '.setup-panel');
+  });
   setupWindow.on('closed', () => {
     setupWindow = null;
   });
@@ -804,6 +1053,18 @@ function registerIpc() {
   ipcMain.on('show-window', () => showMainWindow());
   ipcMain.on('open-setup', () => createSetupWindow());
 
+  ipcMain.on('window-minimize', (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender);
+    if (w && !w.isDestroyed()) w.minimize();
+  });
+
+  ipcMain.on('window-close', (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender);
+    if (!w || w.isDestroyed()) return;
+    if (w === mainWindow) w.hide();
+    else w.close();
+  });
+
   ipcMain.handle('get-print-settings', async () => {
     const settings = loadPrintSettings();
     const printers = await listWindowsPrinters();
@@ -816,12 +1077,15 @@ function registerIpc() {
 }
 
 function initApp() {
+  Menu.setApplicationMenu(null);
+
   const userData = app.getPath('userData');
   const { merged, paths } = loadMergedConfig();
   const session = loadSession(userData);
 
   const st0 = getSettings(merged, session);
   dedupStore = new DedupStore(paths.dedupFile, st0.dedupPolicy);
+  bellDedupStore = new DedupStore(paths.bellDedupFile, 'one_per_order');
   configBundle = session?.token ? buildConfig(session, merged, paths) : null;
 
   registerIpc();
@@ -846,6 +1110,13 @@ function initApp() {
   if (!fs.existsSync(st0.scriptPath)) {
     console.error('[config] Script de impressão não encontrado:', st0.scriptPath);
   }
+
+  try {
+    startPrintWebSocketServer(st0);
+  } catch (e) {
+    console.error('[print-ws] falha ao iniciar:', e.message);
+    setLastError(`WebSocket de impressão: ${e.message}`);
+  }
 }
 
 app.whenReady().then(initApp);
@@ -858,5 +1129,11 @@ app.on('before-quit', () => {
     try {
       socket.disconnect();
     } catch (_) {}
+  }
+  if (printWsServer) {
+    try {
+      printWsServer.close();
+    } catch (_) {}
+    printWsServer = null;
   }
 });

@@ -5,5 +5,8 @@
   "DEDUP_POLICY": "order_and_event",
   "USE_ELECTRON_AS_NODE": "1",
   "START_MINIMIZED": "1",
-  "OPEN_AT_LOGIN": "0"
+  "OPEN_AT_LOGIN": "0",
+  "PRINT_WS_ENABLED": "1",
+  "PRINT_WS_PORT": "8787",
+  "PRINT_WS_HOST": "127.0.0.1"
 }

@@ -1,0 +1,40 @@
+========================================
+             MIRA DELIVERY              
+         Rua Teste, 100, Centro         
+========================================
+
+               PEDIDO #42               
+          10/06/2026, 15:00:00          
+
+------------ TIPO DE ENTREGA -----------
+                Entrega                 
+
+Av Cliente, 50
+Bairro: Jardim
+
+--------------- CLIENTE --------------- 
+Nome   : Joao
+Fone   : 11999999999
+
+---------------- ITENS ---------------- 
+Descricao                Unit.     Total
+........................................
+  Sem itens no payload
+
+-------------- PAGAMENTO -------------- 
+Forma   : -
+
+........................................
+Subtotal                         R$ 0,00
+Entrega                          R$ 8,00
+........................................
+TOTAL                            R$ 0,00
+========================================
+
+       Obrigado pela preferencia!       
+             MIRA DELIVERY              
+
+        Powered by MiraDelivery         
+          miradelivery.com.br           
+
+========================================

@@ -7,94 +7,91 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="scanline"></div>
     <main>
-      <header class="top">
-        <h1>
-          <span class="brand-dot">M</span>ira<span style="color:var(--red);">Delivery</span>
-        </h1>
-        <span id="conn" class="badge">—</span>
-      </header>
-
-      <div class="layout">
-        <!-- LEFT: Loja -->
-        <section class="card left-col">
-          <h2 class="section-title">Loja</h2>
-          <p class="store-name" id="storeName">—</p>
-
-          <p class="row">
-            <span class="label">Último pedido impresso</span>
-            <span id="last" class="value">—</span>
-          </p>
-          <p class="row err" id="errRow" hidden>
-            <span class="label">Erro</span>
-            <span id="err" class="value"></span>
-          </p>
-
-          <label class="check">
-            <input type="checkbox" id="login" />
-            Abrir ao iniciar sessão (Windows)
-          </label>
-
-          <p class="actions">
-            <button type="button" id="btnSetup">Alterar conta</button>
-            <button type="button" id="btnLogout" class="secondary">Desconectar</button>
-          </p>
-        </section>
-
-        <!-- RIGHT: Impressoras -->
-        <section class="card right-col print-box">
-          <h2 class="section-title">Impressoras</h2>
-
-          <label class="field">
-            Tipo
-            <select id="printerType">
-              <option value="">Padrão do servidor</option>
-              <option value="windows_spooler">Windows Spooler</option>
-              <option value="network_escpos">Rede ESC/POS</option>
-              <option value="mock_txt">Mock TXT</option>
-            </select>
-          </label>
-
-          <label class="field">
-            Impressora / Destino
-            <select id="printerTargetSelect">
-              <option value="">Selecione...</option>
-            </select>
-            <input id="printerTargetInput" placeholder="IP:PORTA ou nome da impressora" style="margin-top:6px;" />
-          </label>
-
-          <div class="grid-2">
-            <label class="field">
-              Papel (mm)
-              <select id="paperWidthMm">
-                <option value="58">58 mm</option>
-                <option value="80">80 mm</option>
-              </select>
-            </label>
-            <label class="field">
-              Fonte (ESC/POS)
-              <select id="fontScale">
-                <option value="small">Pequena</option>
-                <option value="normal">Normal</option>
-                <option value="large">Grande</option>
-              </select>
-            </label>
+      <div class="app-card">
+        <header class="top titlebar-drag">
+          <h1>
+            <span class="brand-dot">M</span>ira<span style="color:var(--red);">Delivery</span>
+          </h1>
+          <div class="top-right">
+            <span id="conn" class="badge">—</span>
+            <div class="window-controls">
+              <button type="button" class="win-btn" id="btnMinimize" title="Minimizar" aria-label="Minimizar">−</button>
+              <button type="button" class="win-btn win-btn-close" id="btnClose" title="Fechar" aria-label="Fechar">×</button>
+            </div>
           </div>
+        </header>
 
-          <label class="field checkbox-row">
-            <input type="checkbox" id="printBellEnabled" checked />
-            Tocar campainha ao imprimir
-          </label>
-          <label class="field">
-            Volume da campainha
-            <input type="range" id="printBellVolume" min="0" max="100" value="88" />
-          </label>
+        <div class="layout">
+          <!-- LEFT: Loja -->
+          <section class="card left-col">
+            <h2 class="section-title">Loja</h2>
+            <p class="store-name" id="storeName">—</p>
 
-          <p class="actions">
-            <button type="button" id="btnSavePrint">Salvar configuração</button>
-          </p>
-        </section>
+            <p class="row">
+              <span class="label">Último pedido impresso</span>
+              <span id="last" class="value">—</span>
+            </p>
+            <p class="row err" id="errRow" hidden>
+              <span class="label">Erro</span>
+              <span id="err" class="value"></span>
+            </p>
+
+            <label class="check">
+              <input type="checkbox" id="login" />
+              Abrir ao iniciar sessão (Windows)
+            </label>
+
+            <p class="actions">
+              <button type="button" id="btnSetup">Alterar conta</button>
+              <button type="button" id="btnLogout" class="secondary">Desconectar</button>
+            </p>
+          </section>
+
+          <!-- RIGHT: Impressoras -->
+          <section class="card right-col print-box">
+            <h2 class="section-title">Impressoras</h2>
+
+            <label class="field">
+              Impressora
+              <select id="printerTargetSelect">
+                <option value="">Selecione...</option>
+              </select>
+              <input id="printerTargetInput" placeholder="Nome da impressora" style="margin-top:6px;" />
+            </label>
+
+            <div class="grid-2">
+              <label class="field">
+                Papel (mm)
+                <select id="paperWidthMm">
+                  <option value="58">58 mm</option>
+                  <option value="80">80 mm</option>
+                </select>
+              </label>
+              <label class="field">
+                Fonte (ESC/POS)
+                <select id="fontScale">
+                  <option value="small">Pequena</option>
+                  <option value="normal">Normal</option>
+                  <option value="large">Grande</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="field checkbox-row">
+              <input type="checkbox" id="printBellEnabled" checked />
+              Tocar campainha ao imprimir
+            </label>
+            <label class="field">
+              Volume da campainha
+              <input type="range" id="printBellVolume" min="0" max="100" value="88" />
+            </label>
+
+            <p class="actions">
+              <button type="button" id="btnSavePrint">Salvar configuração</button>
+            </p>
+          </section>
+        </div>
       </div>
     </main>
     <script src="https://cdn.jsdelivr.net/gh/IonDen/ion.sound@3.0.7/js/ion.sound.min.js"></script>

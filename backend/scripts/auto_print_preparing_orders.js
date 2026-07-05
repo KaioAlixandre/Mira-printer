@@ -113,8 +113,27 @@ function parseOptionsSnapshot(raw) {
   }
 }
 
+function getItemOptionsSnapshot(item) {
+  return parseOptionsSnapshot(
+    item?.opcoesSelecionadas ||
+      item?.opcoesSelecionadasSnapshot ||
+      item?.selectedOptionsSnapshot ||
+      item?.selectedOptions
+  );
+}
+
+function getPrintFlavorCatalog() {
+  if (Array.isArray(payload?.__printFlavors) && payload.__printFlavors.length) {
+    return payload.__printFlavors;
+  }
+  if (Array.isArray(payload?.flavors) && payload.flavors.length) {
+    return payload.flavors;
+  }
+  return [];
+}
+
 function resolveItemName(item) {
-  const snap = parseOptionsSnapshot(item?.opcoesSelecionadas || item?.opcoesSelecionadasSnapshot);
+  const snap = getItemOptionsSnapshot(item);
   return firstNonEmpty(
     item?.produto?.nome,
     item?.produto?.name,
@@ -178,7 +197,16 @@ function getItemAdditionalsDetailed(item) {
     );
   });
 
-  const snapshot = parseOptionsSnapshot(item?.opcoesSelecionadas || item?.opcoesSelecionadasSnapshot);
+  const frontendAdditionals = Array.isArray(item?.additionals) ? item.additionals : [];
+  frontendAdditionals.forEach((a) => {
+    pushAdditional(
+      a?.quantity ?? a?.quantidade ?? 1,
+      firstNonEmpty(a?.name, a?.nome, a?.label),
+      Number(a?.value ?? a?.valor ?? a?.price ?? a?.preco ?? 0)
+    );
+  });
+
+  const snapshot = getItemOptionsSnapshot(item);
   const snapshotAdditionals = Array.isArray(snapshot?.adicionais)
     ? snapshot.adicionais
     : Array.isArray(snapshot?.additionals)
@@ -230,7 +258,14 @@ function parseItemComplements(item) {
     pushIfValid(c?.name);
   });
 
-  const snapshot = parseOptionsSnapshot(item?.opcoesSelecionadas || item?.opcoesSelecionadasSnapshot);
+  const frontendComplements = Array.isArray(item?.complements) ? item.complements : [];
+  frontendComplements.forEach((c) => {
+    pushIfValid(c?.name);
+    pushIfValid(c?.nome);
+    pushIfValid(c?.label);
+  });
+
+  const snapshot = getItemOptionsSnapshot(item);
   const snapshotComplements = Array.isArray(snapshot?.complementos)
     ? snapshot.complementos
     : Array.isArray(snapshot?.complements)
@@ -245,6 +280,11 @@ function parseItemComplements(item) {
     pushIfValid(c?.name);
     pushIfValid(c?.label);
   });
+
+  const customData = snapshot?.customAcai || snapshot?.customSorvete || snapshot?.customProduct;
+  if (customData?.complementNames && Array.isArray(customData.complementNames)) {
+    customData.complementNames.forEach(pushIfValid);
+  }
 
   return [...new Set(complementNames)].join(', ');
 }
@@ -272,7 +312,14 @@ function parseItemFlavors(item) {
     pushIfValid(s?.name);
   });
 
-  const snapshot = parseOptionsSnapshot(item?.opcoesSelecionadas || item?.opcoesSelecionadasSnapshot);
+  const fromFrontendFlavors = Array.isArray(item?.flavors) ? item.flavors : [];
+  fromFrontendFlavors.forEach((s) => {
+    pushIfValid(s?.name);
+    pushIfValid(s?.nome);
+    pushIfValid(s?.label);
+  });
+
+  const snapshot = getItemOptionsSnapshot(item);
   const snapshotFlavors = Array.isArray(snapshot?.sabores)
     ? snapshot.sabores
     : Array.isArray(snapshot?.flavors)
@@ -287,6 +334,29 @@ function parseItemFlavors(item) {
     pushIfValid(s?.name);
     pushIfValid(s?.label);
   });
+
+  const selectedFlavors = snapshot?.selectedFlavors || snapshot?.flavorIds;
+  if (selectedFlavors && typeof selectedFlavors === 'object' && !Array.isArray(selectedFlavors)) {
+    const flavorIds = [];
+    Object.values(selectedFlavors).forEach((ids) => {
+      if (Array.isArray(ids)) {
+        ids.forEach((id) => {
+          const n = Number(id);
+          if (Number.isFinite(n)) flavorIds.push(n);
+        });
+      }
+    });
+    if (flavorIds.length) {
+      const catalog = getPrintFlavorCatalog();
+      catalog.forEach((f) => {
+        const id = Number(f?.id);
+        if (flavorIds.includes(id)) {
+          pushIfValid(f?.name);
+          pushIfValid(f?.nome);
+        }
+      });
+    }
+  }
 
   return [...new Set(flavorNames)].join(', ');
 }
@@ -337,12 +407,35 @@ const printerType = String(localPrinterType || printCfg.printerType || 'mock_txt
 const printerTarget = String(localPrinterTarget || printCfg.printerTarget || '').trim();
 const paperWidthMm = Number(localPaperWidth || printCfg.paperWidthMm || 80);
 
-function resolveReceiptWidth(widthMm) {
-  const width = Number(widthMm);
-  if (!Number.isFinite(width) || width <= 0) return 48;
-  return width >= 76 ? 48 : 32;
+// Espelha printOrderReceipt.ts (Mira-Delivery Frontend/src/utils/printOrderReceipt.ts)
+const RECEIPT_CONTENT_MM = 68;
+const RECEIPT_LINE_HEIGHT = 1.35;
+const RECEIPT_FONT_PT = {
+  body: 13,
+  muted: 11,
+  small: 10,
+  large: 16,
+  title: 26,
+  heading: 18,
+  itemTitle: 14,
+  itemPrice: 13,
+  itemDetail: 13,
+};
+
+function resolveReceiptContentMm(widthMm) {
+  const paper = Number(widthMm);
+  if (!Number.isFinite(paper) || paper <= 0) return RECEIPT_CONTENT_MM;
+  if (paper >= 76) return RECEIPT_CONTENT_MM;
+  return Math.max(40, Math.round(paper * (RECEIPT_CONTENT_MM / 80)));
 }
 
+function resolveReceiptWidth(widthMm) {
+  const contentMm = resolveReceiptContentMm(widthMm);
+  // Menos colunas = fonte maior na mesma largura física (~32 cols ref. em 80mm).
+  return Math.max(20, Math.round(contentMm * (38 / 80)));
+}
+
+const receiptContentMm = resolveReceiptContentMm(paperWidthMm);
 const receiptWidth = resolveReceiptWidth(paperWidthMm);
 
 // ─── Helpers de formatação ───────────────────────────────────────────────────
@@ -370,6 +463,17 @@ function center(text, width) {
 
 function divider(char = '-', width = receiptWidth) {
   return char.repeat(width);
+}
+
+function sectionHeader(label, width = receiptWidth) {
+  const text = String(label || '').trim();
+  if (!text) return divider('-', width);
+  const inner = ` ${text} `;
+  if (inner.length >= width) return text.slice(0, width);
+  const sideLen = Math.floor((width - inner.length) / 2);
+  const left = '-'.repeat(sideLen);
+  const right = '-'.repeat(width - sideLen - inner.length);
+  return left + inner + right;
 }
 
 function wrapText(text, width) {
@@ -418,7 +522,7 @@ function resolveStoreAddress(payloadObj) {
 }
 
 function extractItemObs(item) {
-  const snap = parseOptionsSnapshot(item?.opcoesSelecionadas || item?.opcoesSelecionadasSnapshot);
+  const snap = getItemOptionsSnapshot(item);
   return firstNonEmpty(item?.observacao, snap?.observacao, snap?.observation);
 }
 
@@ -435,50 +539,87 @@ function getDeliveryReference(payloadObj) {
 }
 
 function isCustomProduct(item) {
-  const snap = parseOptionsSnapshot(item?.opcoesSelecionadas || item?.opcoesSelecionadasSnapshot);
+  const snap = getItemOptionsSnapshot(item);
   return !!(snap?.customAcai || snap?.customSorvete || snap?.customProduct);
 }
 
 // ─── Montagem do cupom ───────────────────────────────────────────────────────
 
 const lines = [];
+const lineStyles = [];
+
+function pushLine(text, style = 'normal') {
+  lines.push(text);
+  lineStyles.push(style);
+}
 
 // Cabeçalho
-lines.push(divider('='));
-lines.push(center(storeName, receiptWidth));
+pushLine(divider('='), 'normal');
+pushLine(center(storeName, receiptWidth), 'normal');
 const storeAddress = resolveStoreAddress(payload);
-if (storeAddress) lines.push(center(storeAddress, receiptWidth));
-lines.push(divider('='));
-lines.push('');
+if (storeAddress) {
+  wrapText(storeAddress, receiptWidth).forEach((l) => pushLine(center(l, receiptWidth), 'normal'));
+}
+pushLine(divider('='), 'normal');
+pushLine('', 'normal');
 
 // Número e data do pedido
 const orderNumber = `PEDIDO #${payload.dailyNumber || payload.id}`;
-lines.push(center(orderNumber, receiptWidth));
-lines.push(center(formatDate(payload.criadoEm || payload.createdAt), receiptWidth));
-lines.push('');
+pushLine(center(orderNumber, receiptWidth), 'normal');
+pushLine(center(formatDate(payload.criadoEm || payload.createdAt), receiptWidth), 'normal');
+const previsaoEntrega = firstNonEmpty(
+  payload.previsaoEntrega,
+  payload.janelaEntrega,
+  payload.estimatedDeliveryWindow,
+  payload.estimatedDeliveryTime
+);
+if (previsaoEntrega) {
+  wrapText(`Previsao: ${previsaoEntrega}`, receiptWidth).forEach((l) =>
+    pushLine(center(l, receiptWidth), 'normal')
+  );
+}
+pushLine('', 'normal');
 
 // Tipo de entrega
-lines.push(center('------------ TIPO DE ENTREGA ------------', receiptWidth));
+pushLine(sectionHeader('TIPO DE ENTREGA'), 'normal');
+pushLine(center(formatDeliveryType(deliveryTypeRaw), receiptWidth), 'normal');
 
-const deliveryLabel = formatDeliveryType(deliveryTypeRaw);
-lines.push(center(deliveryLabel, receiptWidth));
+const deliveryTypeLower = String(deliveryTypeRaw).toLowerCase();
+if (deliveryTypeLower === 'delivery') {
+  pushLine('', 'normal');
+  const ruaEntrega = firstNonEmpty(payload.ruaEntrega, payload.shippingStreet, payload.deliveryStreet);
+  const numeroEntrega = firstNonEmpty(payload.numeroEntrega, payload.shippingNumber, payload.deliveryNumber);
+  const complementoEntrega = firstNonEmpty(
+    payload.complementoEntrega,
+    payload.shippingComplement,
+    payload.deliveryComplement
+  );
+  const bairroEntrega = firstNonEmpty(
+    payload.bairroEntrega,
+    payload.shippingNeighborhood,
+    payload.deliveryNeighborhood
+  );
+  const cidadeEntrega = firstNonEmpty(payload.cidadeEntrega, payload.shippingCity, payload.deliveryCity);
+  const cepEntrega = firstNonEmpty(payload.cepEntrega, payload.shippingZipCode, payload.deliveryZipCode, payload.cep);
+  const deliveryReference = getDeliveryReference(payload);
 
-if (String(deliveryTypeRaw).toLowerCase() === 'delivery') {
-  lines.push('');
-  const streetLine = [payload.ruaEntrega, payload.numeroEntrega].filter(Boolean).join(', ');
-  const withComp = [streetLine, payload.complementoEntrega ? `Comp: ${payload.complementoEntrega}` : '']
+  const streetLine = [ruaEntrega, numeroEntrega].filter(Boolean).join(', ');
+  const withComp = [streetLine, complementoEntrega ? `Comp: ${complementoEntrega}` : '']
     .filter(Boolean)
     .join(' ');
-  if (withComp) wrapText(withComp, receiptWidth).forEach((l) => lines.push(l));
-  if (payload.bairroEntrega) wrapText(`Bairro: ${payload.bairroEntrega}`, receiptWidth).forEach((l) => lines.push(l));
-  const deliveryReference = getDeliveryReference(payload);
-  if (deliveryReference) wrapText(`Ref.: ${deliveryReference}`, receiptWidth).forEach((l) => lines.push(l));
-}
-if (String(deliveryTypeRaw).toLowerCase() === 'dine_in' && payload.identificadorMesaSenha) {
-  wrapText(`Mesa: ${payload.identificadorMesaSenha}`, receiptWidth).forEach((l) => lines.push(l));
-}
-if (String(deliveryTypeRaw).toLowerCase() === 'pickup') {
-  wrapText('Cliente retira no estabelecimento', receiptWidth).forEach((l) => lines.push(l));
+  if (withComp) wrapText(withComp, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  if (bairroEntrega) wrapText(`Bairro: ${bairroEntrega}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  if (deliveryReference) wrapText(`Ref.: ${deliveryReference}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  if (cidadeEntrega || cepEntrega) {
+    const cidadeCep = [cidadeEntrega, cepEntrega ? `CEP: ${cepEntrega}` : ''].filter(Boolean).join(' | ');
+    wrapText(cidadeCep, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  }
+} else if (deliveryTypeLower === 'dine_in' && payload.identificadorMesaSenha) {
+  pushLine('', 'normal');
+  wrapText(`Mesa: ${payload.identificadorMesaSenha}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+} else if (deliveryTypeLower === 'pickup') {
+  pushLine('', 'normal');
+  wrapText('Cliente retira no estabelecimento', receiptWidth).forEach((l) => pushLine(l, 'normal'));
 }
 
 // PDV usa `usuario` = USUARIO_BALCAO: não exibir esse login como nome do cliente.
@@ -538,28 +679,32 @@ const hasClientBlock = !!(
   clientEmail
 );
 
+// Linha de valor (rótulo à esquerda, valor à direita) alinhada à largura.
+function moneyRow(label, value) {
+  const valueStr = brl(value);
+  const labelWidth = Math.max(1, receiptWidth - valueStr.length);
+  return `${padRight(label, labelWidth)}${padLeft(valueStr, valueStr.length)}`;
+}
+
+// Dados do cliente
 if (hasClientBlock) {
-  lines.push('');
-  lines.push(center('--------------- CLIENTE ---------------', receiptWidth));
-  lines.push(`Nome   : ${clientName}`);
-  if (clientPhone) lines.push(`Fone   : ${clientPhone}`);
-  if (!isCounterUser && clientEmail) lines.push(`E-mail : ${clientEmail}`);
-  if (totalOrders) lines.push(`Pedidos: ${totalOrders}`);
+  pushLine('', 'normal');
+  pushLine(sectionHeader('CLIENTE'), 'normal');
+  wrapText(`Nome: ${clientName}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  if (clientPhone) wrapText(`Telefone: ${clientPhone}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  if (!isCounterUser && clientEmail) wrapText(`E-mail: ${clientEmail}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  if (totalOrders) wrapText(`Pedidos: ${totalOrders}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
 }
 
 // Itens
-lines.push('');
-lines.push(center('---------------- ITENS ----------------', receiptWidth));
-
-// Cabeçalho da tabela de itens
-const descWidth = receiptWidth - 1 - 10 - 10;
-lines.push(`${padRight('Descricao', descWidth)} ${padLeft('Unit.', 10)}${padLeft('Total', 10)}`);
-lines.push(divider('.'));
+const itemDetailWidth = Math.max(18, receiptWidth - 1);
+pushLine('', 'normal');
+pushLine(sectionHeader('ITENS'), 'normal');
 
 if (!items.length) {
-  lines.push('  Sem itens no payload');
+  pushLine('Sem itens no payload', 'normal');
 } else {
-  items.forEach((item, idx) => {
+  items.forEach((item) => {
     const qty = getItemQty(item);
     const basePrice = getItemBasePrice(item);
     const additionalsTotal = getItemAdditionalsDetailed(item).reduce((acc, a) => acc + a.value * a.qty, 0);
@@ -567,72 +712,88 @@ if (!items.length) {
     const lineTotal = unitTotal * qty;
     const itemName = resolveItemName(item);
 
-    // Linha principal do item: "2x Produto" + valores
-    const itemTitle = `${qty}x ${itemName}`;
-    const titleLines = wrapText(itemTitle, descWidth);
-    lines.push(`${padRight(titleLines[0] || '', descWidth)} ${padLeft(brl(unitTotal), 10)}${padLeft(brl(lineTotal), 10)}`);
-    titleLines.slice(1).forEach((l) => lines.push(l));
-    if (isCustomProduct(item)) lines.push('  > Personalizado');
+    const priceStr = brl(lineTotal);
+    const namePart = `(${qty}) ${itemName}`;
+    const nameWidth = Math.max(6, receiptWidth - priceStr.length - 1);
+    const nameLines = wrapText(namePart, nameWidth);
+    if (!nameLines.length) nameLines.push(namePart.slice(0, nameWidth));
+    nameLines.forEach((l, i) => {
+      if (i === 0) {
+        pushLine(`${padRight(l, receiptWidth - priceStr.length)}${priceStr}`, 'normal');
+      } else {
+        pushLine(l, 'normal');
+      }
+    });
 
-    // Sabores, complementos e adicionais com recuo
+    if (isCustomProduct(item)) pushLine('  Personalizado', 'normal');
+
     const flavors = parseItemFlavors(item);
     const complements = parseItemComplements(item);
     const additionals = parseItemAdditionals(item);
-    if (flavors)      wrapText(`  Sabor: ${flavors}`, receiptWidth).forEach((l) => lines.push(l));
-    if (complements)  wrapText(`  Compl: ${complements}`, receiptWidth).forEach((l) => lines.push(l));
-    if (additionals)  wrapText(`  Adic : ${additionals}`, receiptWidth).forEach((l) => lines.push(l));
+    if (flavors) {
+      wrapText(`Sabor: ${flavors}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+    }
+    if (complements) {
+      wrapText(`Compl: ${complements}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+    }
+    if (additionals) {
+      wrapText(`Adic: ${additionals}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+    }
 
     const itemObs = extractItemObs(item);
-    if (itemObs) wrapText(`  Obs  : ${itemObs}`, receiptWidth).forEach((l) => lines.push(l));
-
-    // Separador leve entre itens (exceto último)
-    if (idx < items.length - 1) lines.push(divider('.'));
+    if (itemObs) {
+      wrapText(`Obs: ${itemObs}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+    }
   });
 }
 
 // Observações do pedido
 const orderNotes = firstNonEmpty(payload.observacoes, payload.notes);
 if (orderNotes) {
-  lines.push('');
-  lines.push(center('-------------- OBSERVACOES --------------', receiptWidth));
-  wrapText(orderNotes, receiptWidth).forEach((l) => lines.push(l));
+  pushLine('', 'normal');
+  pushLine(sectionHeader('OBSERVACOES'), 'normal');
+  wrapText(orderNotes, receiptWidth).forEach((l) => pushLine(l, 'normal'));
 }
 
-// Pagamento e totais
-lines.push('');
-lines.push(center('-------------- PAGAMENTO --------------', receiptWidth));
+// Pagamento
+pushLine('', 'normal');
+pushLine(sectionHeader('PAGAMENTO'), 'normal');
+wrapText(`Forma de Pagamento: ${paymentMethod}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
 
-lines.push(`Forma   : ${paymentMethod}`);
-
-if (isPixPayment)          lines.push('>>> Pago via PIX - nao cobrar! <<<');
-if (isCashOnDeliveryPayment) lines.push('>>> Dinheiro na entrega - cobrar! <<<');
-if (isCardPayment)         lines.push('>>> Cartao na entrega - cobrar! <<<');
+if (isPixPayment) pushLine('>>> Pago via PIX - nao cobrar!', 'normal');
+if (isCashOnDeliveryPayment) pushLine('>>> Dinheiro na entrega - cobrar!', 'normal');
+if (isCardPayment) pushLine('>>> Cartao na entrega - cobrar!', 'normal');
 
 if (isCashOnDeliveryPayment && payload.precisaTroco && payload.valorTroco) {
   const trocaPara = Number(payload.valorTroco || 0);
-  lines.push(`Pago com: ${brl(trocaPara)}`);
-  lines.push(`Troco   : ${brl(trocaPara - total)}`);
+  pushLine(moneyRow('Pago com:', trocaPara), 'normal');
+  pushLine(moneyRow('Troco:', trocaPara - total), 'normal');
 }
 
-lines.push('');
-lines.push(divider('.'));
-lines.push(`${padRight('Subtotal', receiptWidth - 12)}${padLeft(brl(subtotal), 12)}`);
-if (String(deliveryTypeRaw).toLowerCase() === 'delivery') {
-  lines.push(`${padRight('Entrega', receiptWidth - 12)}${padLeft(brl(deliveryFee), 12)}`);
+// Totais
+pushLine('', 'normal');
+pushLine(divider('.'), 'normal');
+pushLine(moneyRow('Subtotal:', subtotal), 'normal');
+if (deliveryTypeLower === 'delivery') {
+  pushLine(moneyRow('Taxa de entrega:', deliveryFee), 'normal');
 }
-lines.push(divider('.'));
-lines.push(`${padRight('TOTAL', receiptWidth - 12)}${padLeft(brl(total), 12)}`);
-lines.push(divider('='));
+pushLine(divider('.'), 'normal');
+pushLine(moneyRow('TOTAL:', total), 'normal');
+pushLine(divider('='), 'normal');
 
 // Rodapé
-lines.push('');
-lines.push(center('Obrigado pela preferencia!', receiptWidth));
-lines.push(center(storeName, receiptWidth));
-lines.push('');
-lines.push(center('Powered by MiraDelivery', receiptWidth));
-lines.push(center('miradelivery.com.br', receiptWidth));
-lines.push('');
-lines.push(divider('='));
+pushLine('', 'normal');
+pushLine(center('Obrigado pela preferencia!', receiptWidth), 'normal');
+pushLine(center(storeName, receiptWidth), 'normal');
+pushLine('', 'normal');
+pushLine(center('Powered by MiraDelivery', receiptWidth), 'normal');
+pushLine(center('miradelivery.com.br', receiptWidth), 'normal');
+pushLine('', 'normal');
+pushLine(divider('='), 'normal');
+
+while (lineStyles.length < lines.length) {
+  lineStyles.push('normal');
+}
 
 // ─── Impressão ───────────────────────────────────────────────────────────────
 
@@ -653,12 +814,34 @@ function parseTargetIpPort(target) {
 }
 
 function escPosFontPrefix(scale) {
+  // Font B ~9pt; Font A ~10pt altura dupla; Font A altura+ largura dupla ~12pt
   if (scale === 'small') return Buffer.from([0x1b, 0x4d, 0x01, 0x1d, 0x21, 0x00]);
-  if (scale === 'large') return Buffer.from([0x1b, 0x4d, 0x00, 0x1d, 0x21, 0x11]);
-  return Buffer.from([0x1b, 0x4d, 0x00, 0x1d, 0x21, 0x00]);
+  if (scale === 'large') return Buffer.from([0x1b, 0x4d, 0x00, 0x1d, 0x21, 0x10]);
+  return Buffer.from([0x1b, 0x4d, 0x00, 0x1d, 0x21, 0x10]);
 }
 
-function sendToNetworkEscPos(target, text, scale) {
+function escPosLinePrefix(style, scale) {
+  const alignCenter = Buffer.from([0x1b, 0x61, 0x01]);
+  const alignLeft = Buffer.from([0x1b, 0x61, 0x00]);
+  if (style === 'titleCenter') {
+    return Buffer.concat([alignCenter, Buffer.from([0x1b, 0x4d, 0x00, 0x1d, 0x21, 0x22])]);
+  }
+  if (style === 'title') {
+    return Buffer.concat([alignLeft, Buffer.from([0x1b, 0x4d, 0x00, 0x1d, 0x21, 0x22])]);
+  }
+  if (style === 'heading') {
+    return Buffer.concat([alignLeft, Buffer.from([0x1b, 0x4d, 0x00, 0x1d, 0x21, 0x11])]);
+  }
+  if (style === 'itemTitle') {
+    return Buffer.concat([alignLeft, Buffer.from([0x1b, 0x4d, 0x00, 0x1d, 0x21, 0x11])]);
+  }
+  if (style === 'itemPrice' || style === 'itemDetail') {
+    return Buffer.concat([alignLeft, Buffer.from([0x1b, 0x4d, 0x00, 0x1d, 0x21, 0x01])]);
+  }
+  return Buffer.concat([alignLeft, escPosFontPrefix(scale)]);
+}
+
+function sendToNetworkEscPos(target, textLines, styles, scale) {
   return new Promise((resolve, reject) => {
     const targetParsed = parseTargetIpPort(target);
     if (!targetParsed) {
@@ -679,13 +862,17 @@ function sendToNetworkEscPos(target, text, scale) {
     socket.setTimeout(7000);
 
     socket.once('connect', () => {
-      // ESC/POS: init + texto + feed + corte parcial
       const init = Buffer.from([0x1b, 0x40]);
-      const font = escPosFontPrefix(scale);
-      const textBuffer = Buffer.from(`${text}\n`, 'utf8');
+      const chunks = [init];
+      for (let i = 0; i < textLines.length; i += 1) {
+        const style = styles[i] || 'normal';
+        chunks.push(escPosLinePrefix(style, scale));
+        chunks.push(Buffer.from(`${textLines[i]}\n`, 'utf8'));
+      }
+      chunks.push(Buffer.from('\n\n', 'utf8'));
       const feedAndCut = Buffer.from([0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x01]);
-      const full = Buffer.concat([init, font, textBuffer, feedAndCut]);
-      socket.write(full, (err) => {
+      chunks.push(feedAndCut);
+      socket.write(Buffer.concat(chunks), (err) => {
         if (err) {
           finishOnce(reject, err);
           socket.destroy();
@@ -719,15 +906,27 @@ async function main() {
     }
 
     const b64Content = Buffer.from(content, 'utf8').toString('base64');
+    const b64LineStyles = Buffer.from(JSON.stringify(lineStyles), 'utf8').toString('base64');
     const b64Printer = Buffer.from(printerTarget, 'utf8').toString('base64');
     const b64FontScale = Buffer.from(fontScale, 'utf8').toString('base64');
 
     const psScript = `$ErrorActionPreference = 'Stop'
 $content = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64Content}'))
+$lineStylesJson = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64LineStyles}'))
 $wanted = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64Printer}'))
 $fontScale = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64FontScale}'))
 $receiptWidth = ${receiptWidth}
+$receiptContentMm = ${receiptContentMm}
 $paperWidthMm = ${paperWidthMm}
+$receiptLineHeight = ${RECEIPT_LINE_HEIGHT}
+$fontPtBody = ${RECEIPT_FONT_PT.body}
+$fontPtMuted = ${RECEIPT_FONT_PT.muted}
+$fontPtLarge = ${RECEIPT_FONT_PT.large}
+$fontPtTitle = ${RECEIPT_FONT_PT.title}
+$fontPtHeading = ${RECEIPT_FONT_PT.heading}
+$fontPtItemTitle = ${RECEIPT_FONT_PT.itemTitle}
+$fontPtItemPrice = ${RECEIPT_FONT_PT.itemPrice}
+$fontPtItemDetail = ${RECEIPT_FONT_PT.itemDetail}
 function Resolve-MiraPrinter([string]$name) {
   $all = @(Get-Printer | Select-Object -ExpandProperty Name)
   if ($all -contains $name) { return $name }
@@ -750,19 +949,17 @@ Add-Type -AssemblyName System.Drawing
 
 function New-MiraMonoFont([float]$size) {
   try {
-    return New-Object System.Drawing.Font('Consolas', $size, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+    return New-Object System.Drawing.Font('Courier New', $size, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Point)
   } catch {
-    return New-Object System.Drawing.Font([System.Drawing.FontFamily]::GenericMonospace, $size, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+    return New-Object System.Drawing.Font([System.Drawing.FontFamily]::GenericMonospace, $size, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Point)
   }
 }
 
 function Resolve-MiraFont([System.Drawing.Graphics]$graphics, [float]$maxWidth, [int]$cols, [string]$scale) {
-  $size = 8.0
-  if ($scale -eq 'small') { $size = 7.0 }
-  if ($scale -eq 'large') { $size = 10.0 }
+  $size = [float]$fontPtBody
+  if ($scale -eq 'small') { $size = [float]$fontPtMuted }
+  if ($scale -eq 'large') { $size = [float]$fontPtLarge }
 
-  # GenericTypographic: medicao alinhada ao DrawString sem padding extra do GDI;
-  # sem isso a fonte passa de ~1 coluna na largura util e a borda direita corta o ultimo caractere (ex.: "Total" -> "Tota").
   $sf = [System.Drawing.StringFormat]::GenericTypographic
   $sample = 'W' * [Math]::Max(1, $cols)
   while ($size -gt 4.5) {
@@ -776,11 +973,34 @@ function Resolve-MiraFont([System.Drawing.Graphics]$graphics, [float]$maxWidth, 
   return New-MiraMonoFont $size
 }
 
+function Resolve-MiraStyledFont([System.Drawing.Graphics]$graphics, [float]$maxWidth, [string]$lineStyle, [string]$text) {
+  $size = [float]$fontPtBody
+  if ($lineStyle -eq 'title' -or $lineStyle -eq 'titleCenter') { $size = [float]$fontPtTitle }
+  elseif ($lineStyle -eq 'heading') { $size = [float]$fontPtHeading }
+  elseif ($lineStyle -eq 'itemTitle') { $size = [float]$fontPtItemTitle }
+  elseif ($lineStyle -eq 'itemPrice') { $size = [float]$fontPtItemPrice }
+  elseif ($lineStyle -eq 'itemDetail') { $size = [float]$fontPtItemDetail }
+
+  $sf = [System.Drawing.StringFormat]::GenericTypographic
+  while ($size -gt 4.5) {
+    $font = New-MiraMonoFont $size
+    $measured = $graphics.MeasureString($text, $font, 4096, $sf).Width
+    if ($measured -le $maxWidth) { return $font }
+    $font.Dispose()
+    $size = $size - 0.25
+  }
+
+  return New-MiraMonoFont $size
+}
+
 $script:miraLines = $content -split '\\r?\\n'
+$script:miraLineStyles = @($lineStylesJson | ConvertFrom-Json)
 $script:miraLineIndex = 0
-$script:miraFont = $null
+$script:miraNormalFont = $null
+$script:miraFontCache = @{}
 $script:miraReceiptWidth = [Math]::Max(1, $receiptWidth)
 $script:miraFontScale = $fontScale
+$script:miraContentWidth = 0.0
 
 $doc = New-Object System.Drawing.Printing.PrintDocument
 $doc.PrinterSettings.PrinterName = $printerName
@@ -799,26 +1019,54 @@ $doc.add_PrintPage({
   $maxWidth = $printable.Width
   if ($maxWidth -le 0) { $maxWidth = $event.PageBounds.Width }
 
-  if ($script:miraFont -eq $null) {
-    # Margem fisica da impressora + pequena diferenca PrintableArea vs largura real: evita clip na ultima coluna.
-    $usableWidth = [float]([Math]::Max(1, $maxWidth) * 0.97)
-    $script:miraFont = Resolve-MiraFont $event.Graphics $usableWidth $script:miraReceiptWidth $script:miraFontScale
+  if ($script:miraNormalFont -eq $null) {
+    $paperW = [float][Math]::Max(1, $maxWidth)
+    $contentRatio = [float]$receiptContentMm / [float][Math]::Max(1, $paperWidthMm)
+    $script:miraContentWidth = $paperW * $contentRatio
+    $usableWidth = $script:miraContentWidth * 0.98
+    $script:miraNormalFont = Resolve-MiraFont $event.Graphics $usableWidth $script:miraReceiptWidth $script:miraFontScale
   }
 
-  $x = [Math]::Max(0, $printable.Left)
+  $paperW = [float][Math]::Max(1, $maxWidth)
+  $x = [Math]::Max(0, $printable.Left) + (($paperW - $script:miraContentWidth) / 2.0)
   $y = [Math]::Max(0, $printable.Top)
   $maxY = $printable.Bottom
   if ($maxY -le 0) { $maxY = $event.PageBounds.Bottom }
-  $lineHeight = $script:miraFont.GetHeight($event.Graphics)
   $drawSf = [System.Drawing.StringFormat]::GenericTypographic
+  $usableLineWidth = $script:miraContentWidth * 0.98
 
   while ($script:miraLineIndex -lt $script:miraLines.Length) {
+    $lineText = $script:miraLines[$script:miraLineIndex]
+    $lineStyle = 'normal'
+    if ($script:miraLineIndex -lt $script:miraLineStyles.Length) {
+      $lineStyle = [string]$script:miraLineStyles[$script:miraLineIndex]
+      if ([string]::IsNullOrWhiteSpace($lineStyle)) { $lineStyle = 'normal' }
+    }
+
+    if ($lineStyle -eq 'normal') {
+      $lineFont = $script:miraNormalFont
+    } else {
+      $cacheKey = $lineStyle + '|' + $lineText
+      if (-not $script:miraFontCache.ContainsKey($cacheKey)) {
+        $script:miraFontCache[$cacheKey] = Resolve-MiraStyledFont $event.Graphics $usableLineWidth $lineStyle $lineText
+      }
+      $lineFont = $script:miraFontCache[$cacheKey]
+    }
+
+    $lineHeight = $lineFont.GetHeight($event.Graphics) * $receiptLineHeight
     if (($y + $lineHeight) -gt $maxY) {
       $event.HasMorePages = $true
       return
     }
 
-    $event.Graphics.DrawString($script:miraLines[$script:miraLineIndex], $script:miraFont, [System.Drawing.Brushes]::Black, $x, $y, $drawSf)
+    $drawX = $x
+    if ($lineStyle -eq 'titleCenter') {
+      $measured = $event.Graphics.MeasureString($lineText, $lineFont, 4096, $drawSf).Width
+      $offset = ($script:miraContentWidth - $measured) / 2.0
+      if ($offset -gt 0) { $drawX = $x + $offset }
+    }
+
+    $event.Graphics.DrawString($lineText, $lineFont, [System.Drawing.Brushes]::Black, $drawX, $y, $drawSf)
     $y = $y + $lineHeight
     $script:miraLineIndex = $script:miraLineIndex + 1
   }
@@ -827,7 +1075,10 @@ $doc.add_PrintPage({
 })
 
 $doc.Print()
-if ($script:miraFont -ne $null) { $script:miraFont.Dispose() }
+if ($script:miraNormalFont -ne $null) { $script:miraNormalFont.Dispose() }
+foreach ($cachedFont in $script:miraFontCache.Values) {
+  if ($cachedFont -ne $null) { $cachedFont.Dispose() }
+}
 $doc.Dispose()
 `;
 
@@ -877,7 +1128,7 @@ $doc.Dispose()
     if (!printerTarget) {
       throw new Error('Destino da impressora nao configurado para network_escpos.');
     }
-    await sendToNetworkEscPos(printerTarget, content, fontScale);
+    await sendToNetworkEscPos(printerTarget, lines, lineStyles, fontScale);
     console.log(`Cupom enviado para impressora de rede ${printerTarget}`);
     return;
   }

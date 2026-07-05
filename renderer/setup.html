@@ -7,16 +7,19 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="scanline"></div>
-
     <div class="setup-wrapper">
       <div class="setup-panel">
-
-        <div class="setup-logo">
-          <h1><span class="brand-dot">M</span>ira<span style="color:var(--red)">Delivery</span></h1>
+        <div class="setup-header titlebar-drag">
+          <div class="setup-logo">
+            <h1><span class="brand-dot">M</span>ira<span style="color:var(--red)">Delivery</span></h1>
+          </div>
+          <div class="window-controls">
+            <button type="button" class="win-btn" id="btnMinimize" title="Minimizar" aria-label="Minimizar">−</button>
+            <button type="button" class="win-btn win-btn-close" id="btnClose" title="Fechar" aria-label="Fechar">×</button>
+          </div>
         </div>
 
-        <p class="setup-subtitle">// autenticação do AutoPrint</p>
+        <p class="setup-subtitle">Autenticação do AutoPrint</p>
 
         <p class="note">
           Use o mesmo <strong>telefone</strong> e senha de <strong>admin/master</strong>
@@ -53,6 +56,11 @@
           Object.assign(new Event('submit'), { preventDefault: () => {} })
         );
       });
+
+      const btnMinimize = document.getElementById('btnMinimize');
+      const btnClose = document.getElementById('btnClose');
+      if (btnMinimize) btnMinimize.addEventListener('click', () => window.mira.minimizeWindow());
+      if (btnClose) btnClose.addEventListener('click', () => window.mira.closeWindow());
     </script>
   </body>
 </html>
