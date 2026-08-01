@@ -26,43 +26,73 @@ function getPrintSettingsPath() {
   return path.join(app.getPath('userData'), 'print-settings.json');
 }
 
-function loadPrintSettings() {
-  const raw = readJsonSafe(getPrintSettingsPath());
-  if (!raw || typeof raw !== 'object') {
-    return {
-      printerType: 'windows_spooler',
-      printerTarget: '',
-      paperWidthMm: 80,
-      fontScale: 'normal',
-      printBellEnabled: true,
-      printBellVolume: 0.88,
-    };
+const PRINT_SIZE_LIMITS = {
+  paperWidthMm: { min: 40, max: 120, def: 80 },
+  contentWidthMm: { min: 30, max: 120 },
+  fontScalePercent: { min: 60, max: 200, def: 100 },
+  lineHeight: { min: 1, max: 2.2, def: 1.35 },
+};
+
+const LEGACY_FONT_SCALE_PERCENT = { small: 85, normal: 100, large: 120 };
+
+function clampNumber(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+/** O painel usa porcentagem; o modo ESC/POS só entende os três presets. */
+function fontScaleFromPercent(percent) {
+  if (percent <= 92) return 'small';
+  if (percent >= 112) return 'large';
+  return 'normal';
+}
+
+function normalizePrintSettings(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const lim = PRINT_SIZE_LIMITS;
+
+  const paperWidthMm = Math.round(
+    clampNumber(src.paperWidthMm, lim.paperWidthMm.min, lim.paperWidthMm.max, lim.paperWidthMm.def)
+  );
+
+  let contentWidthMm = clampNumber(src.contentWidthMm, 0, lim.contentWidthMm.max, 0);
+  if (contentWidthMm > 0) {
+    contentWidthMm = Math.round(
+      Math.min(paperWidthMm, Math.max(lim.contentWidthMm.min, contentWidthMm))
+    );
   }
-  const bellVolRaw = Number(raw.printBellVolume);
-  const bellVol = Number.isFinite(bellVolRaw)
-    ? Math.min(1, Math.max(0, bellVolRaw))
-    : 0.88;
+
+  const percentSource =
+    src.fontScalePercent !== undefined && src.fontScalePercent !== null
+      ? src.fontScalePercent
+      : LEGACY_FONT_SCALE_PERCENT[String(src.fontScale || 'normal')] ?? lim.fontScalePercent.def;
+  const fontScalePercent = Math.round(
+    clampNumber(percentSource, lim.fontScalePercent.min, lim.fontScalePercent.max, lim.fontScalePercent.def)
+  );
+
+  const lineHeight =
+    Math.round(clampNumber(src.lineHeight, lim.lineHeight.min, lim.lineHeight.max, lim.lineHeight.def) * 100) / 100;
+
   return {
     printerType: 'windows_spooler',
-    printerTarget: String(raw.printerTarget || ''),
-    paperWidthMm: Number(raw.paperWidthMm || 80),
-    fontScale: String(raw.fontScale || 'normal'),
-    printBellEnabled: raw.printBellEnabled !== false,
-    printBellVolume: bellVol,
+    printerTarget: String(src.printerTarget || ''),
+    paperWidthMm,
+    contentWidthMm,
+    fontScalePercent,
+    fontScale: fontScaleFromPercent(fontScalePercent),
+    lineHeight,
+    printBellEnabled: src.printBellEnabled !== false,
+    printBellVolume: clampNumber(src.printBellVolume, 0, 1, 0.88),
   };
 }
 
+function loadPrintSettings() {
+  return normalizePrintSettings(readJsonSafe(getPrintSettingsPath()));
+}
+
 function savePrintSettings(settings) {
-  const volIn = Number(settings?.printBellVolume);
-  const bellVol = Number.isFinite(volIn) ? Math.min(1, Math.max(0, volIn)) : 0.88;
-  const next = {
-    printerType: 'windows_spooler',
-    printerTarget: String(settings?.printerTarget || ''),
-    paperWidthMm: Number(settings?.paperWidthMm || 80),
-    fontScale: String(settings?.fontScale || 'normal'),
-    printBellEnabled: settings?.printBellEnabled !== false,
-    printBellVolume: bellVol,
-  };
+  const next = normalizePrintSettings(settings);
   fs.writeFileSync(getPrintSettingsPath(), JSON.stringify(next), 'utf8');
   return next;
 }
@@ -316,6 +346,7 @@ class DedupStore {
 
 let mainWindow = null;
 let setupWindow = null;
+let printSizeWindow = null;
 let tray = null;
 let socket = null;
 let dedupStore = null;
@@ -358,6 +389,16 @@ function broadcastPrintBell() {
     if (!w.isDestroyed()) {
       try {
         w.webContents.send('print-bell', { volume: vol });
+      } catch (_) {}
+    }
+  });
+}
+
+function broadcastPrintSettings(settings) {
+  BrowserWindow.getAllWindows().forEach((w) => {
+    if (!w.isDestroyed()) {
+      try {
+        w.webContents.send('print-settings-changed', settings);
       } catch (_) {}
     }
   });
@@ -572,7 +613,10 @@ function runPrintScript(mergedEnv, scriptPath, payload, useElectronAsNode, done)
     MIRA_PRINTER_TYPE: 'windows_spooler',
     MIRA_PRINTER_TARGET: printSettings.printerTarget || '',
     MIRA_PAPER_WIDTH_MM: String(printSettings.paperWidthMm || 80),
+    MIRA_CONTENT_WIDTH_MM: String(printSettings.contentWidthMm || 0),
     MIRA_FONT_SCALE: printSettings.fontScale || 'normal',
+    MIRA_FONT_SCALE_PERCENT: String(printSettings.fontScalePercent || 100),
+    MIRA_LINE_HEIGHT: String(printSettings.lineHeight || 1.35),
     MIRA_USER_DATA: userDataPath,
     MIRA_PRINTS_DIR: path.join(userDataPath, 'prints'),
   };
@@ -795,6 +839,10 @@ function createTray() {
       click: () => createSetupWindow(),
     },
     {
+      label: 'Tamanho da impressão…',
+      click: () => createPrintSizeWindow(),
+    },
+    {
       label: 'Abrir pasta (userData)',
       click: () => shell.openPath(app.getPath('userData')),
     },
@@ -936,6 +984,36 @@ function createSetupWindow() {
   });
 }
 
+function createPrintSizeWindow() {
+  if (printSizeWindow && !printSizeWindow.isDestroyed()) {
+    printSizeWindow.show();
+    printSizeWindow.focus();
+    return;
+  }
+  printSizeWindow = new BrowserWindow({
+    width: 880,
+    height: 620,
+    center: true,
+    frame: false,
+    backgroundColor: '#ffffff',
+    autoHideMenuBar: true,
+    parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      autoplayPolicy: 'no-user-gesture-required',
+    },
+  });
+  printSizeWindow.loadFile(path.join(__dirname, 'renderer', 'print-size.html'));
+  printSizeWindow.webContents.on('did-finish-load', () => {
+    fitWindowToContent(printSizeWindow, '.size-panel');
+  });
+  printSizeWindow.on('closed', () => {
+    printSizeWindow = null;
+  });
+}
+
 function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow(false);
   mainWindow.show();
@@ -1052,6 +1130,7 @@ function registerIpc() {
   ipcMain.on('set-open-at-login', (_e, v) => applyOpenAtLogin(!!v));
   ipcMain.on('show-window', () => showMainWindow());
   ipcMain.on('open-setup', () => createSetupWindow());
+  ipcMain.on('open-print-size', () => createPrintSizeWindow());
 
   ipcMain.on('window-minimize', (e) => {
     const w = BrowserWindow.fromWebContents(e.sender);
@@ -1068,11 +1147,13 @@ function registerIpc() {
   ipcMain.handle('get-print-settings', async () => {
     const settings = loadPrintSettings();
     const printers = await listWindowsPrinters();
-    return { settings, printers };
+    return { settings, printers, limits: PRINT_SIZE_LIMITS };
   });
 
   ipcMain.handle('save-print-settings', (_e, settings) => {
-    return savePrintSettings(settings);
+    const saved = savePrintSettings(settings);
+    broadcastPrintSettings(saved);
+    return saved;
   });
 }
 

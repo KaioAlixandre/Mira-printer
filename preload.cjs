@@ -17,9 +17,15 @@ contextBridge.exposeInMainWorld('mira', {
     ipcRenderer.on('print-bell', handler);
     return () => ipcRenderer.removeListener('print-bell', handler);
   },
+  onPrintSettingsChanged: (fn) => {
+    const handler = (_e, settings) => fn(settings ?? {});
+    ipcRenderer.on('print-settings-changed', handler);
+    return () => ipcRenderer.removeListener('print-settings-changed', handler);
+  },
   setOpenAtLogin: (v) => ipcRenderer.send('set-open-at-login', v),
   showWindow: () => ipcRenderer.send('show-window'),
   openSetup: () => ipcRenderer.send('open-setup'),
+  openPrintSize: () => ipcRenderer.send('open-print-size'),
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   closeWindow: () => ipcRenderer.send('window-close'),
 });

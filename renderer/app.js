@@ -8,8 +8,7 @@ const btnSetup = document.getElementById('btnSetup');
 const btnLogout = document.getElementById('btnLogout');
 const printerTargetSelectEl = document.getElementById('printerTargetSelect');
 const printerTargetInputEl = document.getElementById('printerTargetInput');
-const paperWidthEl = document.getElementById('paperWidthMm');
-const fontScaleEl = document.getElementById('fontScale');
+const btnPrintSize = document.getElementById('btnPrintSize');
 const btnSavePrintEl = document.getElementById('btnSavePrint');
 const printBellEnabledEl = document.getElementById('printBellEnabled');
 const printBellVolumeEl = document.getElementById('printBellVolume');
@@ -64,6 +63,8 @@ btnLogout.addEventListener('click', async () => {
   refreshStoreInfo();
 });
 
+if (btnPrintSize) btnPrintSize.addEventListener('click', () => window.mira.openPrintSize());
+
 if (btnMinimize) btnMinimize.addEventListener('click', () => window.mira.minimizeWindow());
 if (btnClose) btnClose.addEventListener('click', () => window.mira.closeWindow());
 
@@ -88,11 +89,10 @@ function syncPrintBellControls() {
 
 printBellEnabledEl.addEventListener('change', syncPrintBellControls);
 
-async function loadPrintSettings() {
-  const { settings, printers } = await window.mira.getPrintSettings();
-  fillPrinters(printers);
-  paperWidthEl.value = String(settings.paperWidthMm || 80);
-  fontScaleEl.value = settings.fontScale || 'normal';
+let currentPrintSettings = {};
+
+function applyPrintSettings(settings) {
+  currentPrintSettings = settings || {};
   printerTargetInputEl.value = settings.printerTarget || '';
   if (settings.printerTarget) {
     printerTargetSelectEl.value = settings.printerTarget;
@@ -103,6 +103,17 @@ async function loadPrintSettings() {
   syncPrintBellControls();
 }
 
+async function loadPrintSettings() {
+  const { settings, printers } = await window.mira.getPrintSettings();
+  fillPrinters(printers);
+  applyPrintSettings(settings);
+}
+
+const offPrintSettings = window.mira.onPrintSettingsChanged((settings) => {
+  currentPrintSettings = settings || {};
+});
+window.addEventListener('beforeunload', () => offPrintSettings());
+
 printerTargetSelectEl.addEventListener('change', () => {
   if (printerTargetSelectEl.value) {
     printerTargetInputEl.value = printerTargetSelectEl.value;
@@ -110,14 +121,14 @@ printerTargetSelectEl.addEventListener('change', () => {
 });
 
 btnSavePrintEl.addEventListener('click', async () => {
-  await window.mira.savePrintSettings({
+  const saved = await window.mira.savePrintSettings({
+    ...currentPrintSettings,
     printerType: 'windows_spooler',
     printerTarget: printerTargetInputEl.value.trim(),
-    paperWidthMm: Number(paperWidthEl.value || 80),
-    fontScale: fontScaleEl.value,
     printBellEnabled: printBellEnabledEl.checked,
     printBellVolume: Number(printBellVolumeEl.value || 0) / 100,
   });
+  applyPrintSettings(saved);
   showSavePopup();
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "mira-printer-agent",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "Agente Electron de impressão automática (Socket.IO + spawn script)",
   "main": "main.cjs",
   "author": "",
@@ -25,7 +25,7 @@
   },
   "build": {
     "appId": "com.mira.printer.agent",
-    "productName": "Mira Printer Agent",
+    "productName": "Mira Printer",
     "directories": {
       "output": "release"
     },

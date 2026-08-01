@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mira AutoPrint - Tamanho da impressão</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="size-panel">
+      <div class="setup-header titlebar-drag">
+        <div class="setup-logo">
+          <h1><span class="brand-dot">M</span>ira<span style="color:var(--red)">Delivery</span></h1>
+        </div>
+        <div class="window-controls">
+          <button type="button" class="win-btn" id="btnMinimize" title="Minimizar" aria-label="Minimizar">−</button>
+          <button type="button" class="win-btn win-btn-close" id="btnClose" title="Fechar" aria-label="Fechar">×</button>
+        </div>
+      </div>
+
+      <p class="setup-subtitle">Tamanho da impressão — papel, área útil e fonte</p>
+
+      <div class="size-layout">
+        <section class="size-controls">
+          <div class="size-group">
+            <h2 class="section-title">Papel</h2>
+
+            <span class="label">Largura do rolo</span>
+            <div class="seg" id="paperPresets">
+              <button type="button" class="seg-btn" data-paper="58">58 mm</button>
+              <button type="button" class="seg-btn" data-paper="80">80 mm</button>
+              <button type="button" class="seg-btn" data-paper="custom">Personalizado</button>
+            </div>
+            <label class="field" id="paperCustomField" hidden>
+              Largura personalizada (mm)
+              <input type="number" id="paperWidthMm" min="40" max="120" step="1" />
+            </label>
+
+            <label class="field checkbox-row">
+              <input type="checkbox" id="contentAuto" />
+              Ajustar a área impressa automaticamente
+            </label>
+            <label class="field" id="contentField">
+              Largura da área impressa: <strong id="contentWidthLabel">—</strong>
+              <input type="range" id="contentWidthMm" min="30" max="120" step="1" />
+            </label>
+          </div>
+
+          <div class="size-group">
+            <h2 class="section-title">Fonte</h2>
+
+            <span class="label">Predefinições</span>
+            <div class="seg" id="fontPresets">
+              <button type="button" class="seg-btn" data-font="85">Pequena</button>
+              <button type="button" class="seg-btn" data-font="100">Normal</button>
+              <button type="button" class="seg-btn" data-font="120">Grande</button>
+              <button type="button" class="seg-btn" data-font="150">Extra</button>
+            </div>
+
+            <label class="field">
+              Escala da fonte: <strong id="fontScaleLabel">100%</strong>
+              <input type="range" id="fontScalePercent" min="60" max="200" step="5" />
+            </label>
+
+            <label class="field">
+              Espaçamento entre linhas: <strong id="lineHeightLabel">1.35</strong>
+              <input type="range" id="lineHeight" min="1" max="2.2" step="0.05" />
+            </label>
+          </div>
+        </section>
+
+        <section class="size-preview-col">
+          <h2 class="section-title">Pré-visualização</h2>
+          <div class="preview-stage">
+            <div class="preview-paper" id="previewPaper">
+              <pre class="preview-content" id="previewContent"></pre>
+            </div>
+          </div>
+          <p class="preview-meta" id="previewMeta">—</p>
+        </section>
+      </div>
+
+      <div class="size-footer">
+        <button type="button" class="btn-link" id="btnReset">Restaurar padrão</button>
+        <div class="size-footer-right">
+          <button type="button" class="btn-ghost" id="btnBack">Voltar</button>
+          <button type="button" class="btn-primary btn-inline" id="btnSave">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="print-size.js"></script>
+  </body>
+</html>

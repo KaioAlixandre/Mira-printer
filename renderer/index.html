@@ -60,24 +60,6 @@
               <input id="printerTargetInput" placeholder="Nome da impressora" style="margin-top:6px;" />
             </label>
 
-            <div class="grid-2">
-              <label class="field">
-                Papel (mm)
-                <select id="paperWidthMm">
-                  <option value="58">58 mm</option>
-                  <option value="80">80 mm</option>
-                </select>
-              </label>
-              <label class="field">
-                Fonte (ESC/POS)
-                <select id="fontScale">
-                  <option value="small">Pequena</option>
-                  <option value="normal">Normal</option>
-                  <option value="large">Grande</option>
-                </select>
-              </label>
-            </div>
-
             <label class="field checkbox-row">
               <input type="checkbox" id="printBellEnabled" checked />
               Tocar campainha ao imprimir
@@ -89,6 +71,7 @@
 
             <p class="actions">
               <button type="button" id="btnSavePrint">Salvar configuração</button>
+              <button type="button" class="btn-outline" id="btnPrintSize">Personalizar impressão</button>
             </p>
           </section>
         </div>

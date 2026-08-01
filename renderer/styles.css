@@ -298,7 +298,7 @@ h1 .brand-dot {
   font-weight: 600;
   padding: 9px 18px;
   border-radius: 999px;
-  border: none;
+  border: 1px solid transparent;
   background: var(--red-soft-bg);
   color: var(--red-soft-text);
   cursor: pointer;
@@ -528,6 +528,161 @@ h1 .brand-dot {
 
 .note strong { color: var(--text); }
 
+/* ─── PRINT SIZE SHORTCUT (main screen) ─── */
+.actions button.btn-outline {
+  background: transparent;
+  border: 1px solid var(--red);
+  color: var(--red);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.actions button.btn-outline:hover {
+  background: var(--red);
+  color: #fff;
+}
+
+/* ─── PRINT SIZE SCREEN ─── */
+.size-panel {
+  padding: 26px 30px 24px;
+}
+
+.size-layout {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: 28px;
+  align-items: start;
+}
+
+.size-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+
+.size-group .section-title {
+  margin-bottom: 10px;
+}
+
+.size-group .label {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.size-group .field[hidden] {
+  display: none !important;
+}
+
+.size-group .field strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.seg {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #f2f3f6;
+}
+
+.seg-btn {
+  flex: 1;
+  padding: 8px 6px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.seg-btn:hover { color: var(--text); }
+
+.seg-btn.active {
+  background: var(--card-bg);
+  color: var(--red);
+  box-shadow: 0 1px 3px rgba(20, 20, 40, 0.14);
+}
+
+.size-preview-col {
+  min-width: 0;
+}
+
+.preview-stage {
+  display: flex;
+  justify-content: center;
+  padding: 16px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #f6f7fa;
+  max-height: 330px;
+  overflow: auto;
+}
+
+.preview-paper {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0;
+  background: #fff;
+  box-shadow: 0 6px 18px -10px rgba(20, 20, 40, 0.4);
+}
+
+.preview-content {
+  font-family: 'Courier New', monospace;
+  font-weight: 700;
+  color: #111;
+  white-space: pre;
+  margin: 0;
+}
+
+.preview-meta {
+  margin-top: 10px;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.size-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--divider);
+}
+
+.size-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-link,
+.btn-ghost {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.84rem;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 10px 12px;
+  border-radius: 999px;
+}
+
+.btn-link:hover { color: var(--red); text-decoration: underline; }
+.btn-ghost:hover { background: var(--divider); color: var(--text); }
+
+.btn-primary.btn-inline {
+  margin-top: 0;
+  padding: 11px 30px;
+}
+
 /* ─── SAVE POPUP ─── */
 .save-popup-overlay {
   position: fixed;
@@ -615,6 +770,7 @@ h1 .brand-dot {
 /* ─── RESPONSIVE ─── */
 @media (max-width: 860px) {
   .layout { grid-template-columns: 1fr; }
+  .size-layout { grid-template-columns: 1fr; }
   .right-col {
     border-left: none;
     border-top: 1px solid var(--divider);

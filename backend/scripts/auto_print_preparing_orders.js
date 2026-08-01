@@ -402,7 +402,10 @@ const printCfg = payload.__autoPrintConfig || {};
 const localPrinterType = String(process.env.MIRA_PRINTER_TYPE || '').trim();
 const localPrinterTarget = String(process.env.MIRA_PRINTER_TARGET || '').trim();
 const localPaperWidth = Number(process.env.MIRA_PAPER_WIDTH_MM || 0);
+const localContentWidth = Number(process.env.MIRA_CONTENT_WIDTH_MM || 0);
 const fontScale = String(process.env.MIRA_FONT_SCALE || 'normal').toLowerCase();
+const localFontScalePercent = Number(process.env.MIRA_FONT_SCALE_PERCENT || 0);
+const localLineHeight = Number(process.env.MIRA_LINE_HEIGHT || 0);
 const printerType = String(localPrinterType || printCfg.printerType || 'mock_txt').toLowerCase();
 const printerTarget = String(localPrinterTarget || printCfg.printerTarget || '').trim();
 const paperWidthMm = Number(localPaperWidth || printCfg.paperWidthMm || 80);
@@ -422,21 +425,55 @@ const RECEIPT_FONT_PT = {
   itemDetail: 13,
 };
 
+const LEGACY_FONT_SCALE_MULTIPLIER = { small: 0.85, normal: 1, large: 1.2 };
+
+function clampNumber(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+const fontScaleMultiplier = clampNumber(
+  (localFontScalePercent || printCfg.fontScalePercent || 0) / 100 ||
+    LEGACY_FONT_SCALE_MULTIPLIER[fontScale] ||
+    1,
+  0.6,
+  2,
+  1
+);
+
+const receiptLineHeight = clampNumber(
+  localLineHeight || printCfg.lineHeight || RECEIPT_LINE_HEIGHT,
+  1,
+  2.2,
+  RECEIPT_LINE_HEIGHT
+);
+
 function resolveReceiptContentMm(widthMm) {
   const paper = Number(widthMm);
-  if (!Number.isFinite(paper) || paper <= 0) return RECEIPT_CONTENT_MM;
-  if (paper >= 76) return RECEIPT_CONTENT_MM;
-  return Math.max(40, Math.round(paper * (RECEIPT_CONTENT_MM / 80)));
+  const paperMm = Number.isFinite(paper) && paper > 0 ? paper : 80;
+  const custom = Number(localContentWidth || printCfg.contentWidthMm || 0);
+  if (Number.isFinite(custom) && custom > 0) {
+    return Math.round(Math.min(paperMm, Math.max(30, custom)));
+  }
+  if (paperMm >= 76) return RECEIPT_CONTENT_MM;
+  return Math.max(40, Math.round(paperMm * (RECEIPT_CONTENT_MM / 80)));
 }
 
 function resolveReceiptWidth(widthMm) {
   const contentMm = resolveReceiptContentMm(widthMm);
   // Menos colunas = fonte maior na mesma largura física (~32 cols ref. em 80mm).
-  return Math.max(20, Math.round(contentMm * (38 / 80)));
+  const baseCols = contentMm * (38 / 80);
+  return Math.max(16, Math.round(baseCols / fontScaleMultiplier));
 }
 
 const receiptContentMm = resolveReceiptContentMm(paperWidthMm);
 const receiptWidth = resolveReceiptWidth(paperWidthMm);
+
+/** Teto de tamanho por estilo: sem escalar, o ajuste automático limitaria a fonte maior. */
+function scaledFontPt(pt) {
+  return (pt * fontScaleMultiplier).toFixed(2);
+}
 
 // ─── Helpers de formatação ───────────────────────────────────────────────────
 
@@ -918,15 +955,15 @@ $fontScale = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(
 $receiptWidth = ${receiptWidth}
 $receiptContentMm = ${receiptContentMm}
 $paperWidthMm = ${paperWidthMm}
-$receiptLineHeight = ${RECEIPT_LINE_HEIGHT}
-$fontPtBody = ${RECEIPT_FONT_PT.body}
-$fontPtMuted = ${RECEIPT_FONT_PT.muted}
-$fontPtLarge = ${RECEIPT_FONT_PT.large}
-$fontPtTitle = ${RECEIPT_FONT_PT.title}
-$fontPtHeading = ${RECEIPT_FONT_PT.heading}
-$fontPtItemTitle = ${RECEIPT_FONT_PT.itemTitle}
-$fontPtItemPrice = ${RECEIPT_FONT_PT.itemPrice}
-$fontPtItemDetail = ${RECEIPT_FONT_PT.itemDetail}
+$receiptLineHeight = ${receiptLineHeight.toFixed(2)}
+$fontPtBody = ${scaledFontPt(RECEIPT_FONT_PT.body)}
+$fontPtMuted = ${scaledFontPt(RECEIPT_FONT_PT.muted)}
+$fontPtLarge = ${scaledFontPt(RECEIPT_FONT_PT.large)}
+$fontPtTitle = ${scaledFontPt(RECEIPT_FONT_PT.title)}
+$fontPtHeading = ${scaledFontPt(RECEIPT_FONT_PT.heading)}
+$fontPtItemTitle = ${scaledFontPt(RECEIPT_FONT_PT.itemTitle)}
+$fontPtItemPrice = ${scaledFontPt(RECEIPT_FONT_PT.itemPrice)}
+$fontPtItemDetail = ${scaledFontPt(RECEIPT_FONT_PT.itemDetail)}
 function Resolve-MiraPrinter([string]$name) {
   $all = @(Get-Printer | Select-Object -ExpandProperty Name)
   if ($all -contains $name) { return $name }
