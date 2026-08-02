@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('mira', {
   logout: () => ipcRenderer.invoke('auth-logout'),
   getPrintSettings: () => ipcRenderer.invoke('get-print-settings'),
   savePrintSettings: (body) => ipcRenderer.invoke('save-print-settings', body),
+  printTest: (body) => ipcRenderer.invoke('print-test', body),
   onStatus: (fn) => {
     const handler = (_e, payload) => fn(payload);
     ipcRenderer.on('status', handler);

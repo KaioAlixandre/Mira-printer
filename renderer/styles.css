@@ -529,16 +529,29 @@ h1 .brand-dot {
 .note strong { color: var(--text); }
 
 /* ─── PRINT SIZE SHORTCUT (main screen) ─── */
+.btn-outline,
 .actions button.btn-outline {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 999px;
   background: transparent;
   border: 1px solid var(--red);
   color: var(--red);
+  cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+.btn-outline:hover,
 .actions button.btn-outline:hover {
   background: var(--red);
   color: #fff;
+}
+
+.btn-outline:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* ─── PRINT SIZE SCREEN ─── */
@@ -717,6 +730,11 @@ h1 .brand-dot {
   font-weight: 700;
   display: grid;
   place-items: center;
+}
+
+.save-popup-icon.error {
+  background: var(--red-soft-bg);
+  color: var(--red);
 }
 
 .save-popup-title {

@@ -598,8 +598,8 @@ function startPrintWebSocketServer(settings) {
   });
 }
 
-function runPrintScript(mergedEnv, scriptPath, payload, useElectronAsNode, done) {
-  const printSettings = loadPrintSettings();
+function runPrintScript(mergedEnv, scriptPath, payload, useElectronAsNode, done, printSettingsOverride) {
+  const printSettings = printSettingsOverride || loadPrintSettings();
   const userDataPath = app.getPath('userData');
   const sessionStoreName = getSessionStoreName();
   const envStoreName =
@@ -681,22 +681,95 @@ function processPrintQueue(bundle) {
   if (!next) return;
   isPrinting = true;
 
-  runPrintScript(bundle.merged, bundle.settings.scriptPath, next.payload, bundle.settings.useElectronAsNode, (err) => {
-    if (typeof next.onDone === 'function') {
-      try {
-        next.onDone(err);
-      } catch (e) {
-        console.error('[print] onDone error', e);
+  runPrintScript(
+    bundle.merged,
+    bundle.settings.scriptPath,
+    next.payload,
+    bundle.settings.useElectronAsNode,
+    (err) => {
+      if (typeof next.onDone === 'function') {
+        try {
+          next.onDone(err);
+        } catch (e) {
+          console.error('[print] onDone error', e);
+        }
       }
-    }
-    isPrinting = false;
-    processPrintQueue(bundle);
-  });
+      isPrinting = false;
+      processPrintQueue(bundle);
+    },
+    next.printSettingsOverride || null
+  );
 }
 
-function enqueuePrint(bundle, payload, onDone) {
-  printQueue.push({ payload, onDone: onDone || null });
+function enqueuePrint(bundle, payload, onDone, printSettingsOverride) {
+  printQueue.push({
+    payload,
+    onDone: onDone || null,
+    printSettingsOverride: printSettingsOverride || null,
+  });
   processPrintQueue(bundle);
+}
+
+function buildTestPrintPayload(bundle) {
+  const storeName =
+    (bundle?.session?.lojaNome && String(bundle.session.lojaNome).trim()) ||
+    getSessionStoreName() ||
+    'Mira Delivery';
+
+  return {
+    id: 'TESTE',
+    dailyNumber: 'TESTE',
+    criadoEm: new Date().toISOString(),
+    previsaoEntrega: '40-60 min',
+    tipoEntrega: 'delivery',
+    metodoPagamento: 'PIX',
+    taxaEntrega: 6,
+    precoTotal: 75,
+    observacoes: 'Sem cebola. Entregar no portao.',
+    totalPedidos: 12,
+    nomeClienteAvulso: 'Maria Silva',
+    telefoneEntrega: '(11) 99999-8888',
+    usuario: {
+      nomeUsuario: 'Maria Silva',
+      telefone: '(11) 99999-8888',
+      email: 'maria.silva@email.com',
+      totalPedidos: 12,
+    },
+    ruaEntrega: 'Rua das Flores',
+    numeroEntrega: '250',
+    complementoEntrega: 'Apto 12',
+    bairroEntrega: 'Centro',
+    cidadeEntrega: 'Sao Paulo',
+    cepEntrega: '01001-000',
+    referenciaEntrega: 'Proximo ao mercado',
+    loja: {
+      id: bundle?.settings?.lojaId || undefined,
+      nome: storeName,
+      rua: 'Av. Principal',
+      numero: '100',
+      bairro: 'Centro',
+    },
+    itens_pedido: [
+      {
+        quantidade: 1,
+        precoNoPedido: 45,
+        produto: { nome: 'Pizza Calabresa G' },
+        sabores: [{ nome: 'Calabresa' }],
+        complements: [{ name: 'Borda catupiry' }],
+        item_pedido_adicionais: [
+          { quantidade: 1, adicional: { nome: 'Bacon', preco: 5 } },
+        ],
+        observacao: 'Bem assada',
+      },
+      {
+        quantidade: 2,
+        precoNoPedido: 12,
+        produto: { nome: 'Refrigerante 2L' },
+      },
+    ],
+    _printKind: 'test_print',
+    _source: 'mira-printer-agent-test',
+  };
 }
 
 function handleIncomingEvent(bundle, eventName, rawPayload) {
@@ -1154,6 +1227,33 @@ function registerIpc() {
     const saved = savePrintSettings(settings);
     broadcastPrintSettings(saved);
     return saved;
+  });
+
+  ipcMain.handle('print-test', async (_e, sizeOverrides) => {
+    const current = loadPrintSettings();
+    if (!String(current.printerTarget || '').trim()) {
+      throw new Error('Configure a impressora na tela principal antes de testar.');
+    }
+
+    const bundle = getPrintBundle();
+    if (!fs.existsSync(bundle.settings.scriptPath)) {
+      throw new Error('Script de impressão não encontrado.');
+    }
+
+    const printSettings = normalizePrintSettings({
+      ...current,
+      ...(sizeOverrides && typeof sizeOverrides === 'object' ? sizeOverrides : {}),
+    });
+
+    const payload = buildTestPrintPayload(bundle);
+    setLastPrint('Impressão de teste');
+    setLastError(null);
+
+    await new Promise((resolve, reject) => {
+      enqueuePrint(bundle, payload, (err) => (err ? reject(err) : resolve()), printSettings);
+    });
+
+    return { ok: true };
   });
 }
 

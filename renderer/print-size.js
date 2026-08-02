@@ -14,6 +14,7 @@ const previewPaperEl = document.getElementById('previewPaper');
 const previewContentEl = document.getElementById('previewContent');
 const previewMetaEl = document.getElementById('previewMeta');
 const btnReset = document.getElementById('btnReset');
+const btnTest = document.getElementById('btnTest');
 const btnBack = document.getElementById('btnBack');
 const btnSave = document.getElementById('btnSave');
 const btnMinimize = document.getElementById('btnMinimize');
@@ -210,17 +211,38 @@ btnSave.addEventListener('click', async () => {
   }
 });
 
-function showSavePopup(message) {
+btnTest.addEventListener('click', async () => {
+  btnTest.disabled = true;
+  const prevLabel = btnTest.textContent;
+  btnTest.textContent = 'Imprimindo…';
+  try {
+    await window.mira.printTest({
+      paperWidthMm: state.paperWidthMm,
+      contentWidthMm: state.contentWidthMm,
+      fontScalePercent: state.fontScalePercent,
+      lineHeight: state.lineHeight,
+    });
+    showSavePopup('Impressão de teste enviada!');
+  } catch (err) {
+    showSavePopup(err?.message || 'Falha ao imprimir o teste.', { error: true });
+  } finally {
+    btnTest.disabled = false;
+    btnTest.textContent = prevLabel;
+  }
+});
+
+function showSavePopup(message, opts = {}) {
   const existing = document.getElementById('savePopup');
   if (existing) existing.remove();
 
+  const isError = !!opts.error;
   const overlay = document.createElement('div');
   overlay.id = 'savePopup';
   overlay.className = 'save-popup-overlay';
   overlay.innerHTML = `
-    <div class="save-popup" role="alertdialog" aria-live="polite" aria-label="Configuração salva">
-      <div class="save-popup-icon" aria-hidden="true">✓</div>
-      <p class="save-popup-title">Salvo!</p>
+    <div class="save-popup" role="alertdialog" aria-live="polite" aria-label="${isError ? 'Erro' : 'Sucesso'}">
+      <div class="save-popup-icon${isError ? ' error' : ''}" aria-hidden="true">${isError ? '!' : '✓'}</div>
+      <p class="save-popup-title">${isError ? 'Atenção' : 'Pronto!'}</p>
       <p class="save-popup-msg">${message}</p>
       <button type="button" class="save-popup-btn">OK</button>
     </div>
@@ -232,7 +254,7 @@ function showSavePopup(message) {
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) close();
   });
-  setTimeout(close, 2400);
+  setTimeout(close, isError ? 4000 : 2400);
 }
 
 window.mira.getPrintSettings().then(({ settings }) => {

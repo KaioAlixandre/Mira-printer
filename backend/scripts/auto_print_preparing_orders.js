@@ -615,49 +615,12 @@ if (previsaoEntrega) {
     pushLine(center(l, receiptWidth), 'normal')
   );
 }
-pushLine('', 'normal');
 
-// Tipo de entrega
-pushLine(sectionHeader('TIPO DE ENTREGA'), 'normal');
-pushLine(center(formatDeliveryType(deliveryTypeRaw), receiptWidth), 'normal');
-
+// Entrega / Retirada / Mesa — destaque abaixo da data (sem subtítulo)
 const deliveryTypeLower = String(deliveryTypeRaw).toLowerCase();
-if (deliveryTypeLower === 'delivery') {
-  pushLine('', 'normal');
-  const ruaEntrega = firstNonEmpty(payload.ruaEntrega, payload.shippingStreet, payload.deliveryStreet);
-  const numeroEntrega = firstNonEmpty(payload.numeroEntrega, payload.shippingNumber, payload.deliveryNumber);
-  const complementoEntrega = firstNonEmpty(
-    payload.complementoEntrega,
-    payload.shippingComplement,
-    payload.deliveryComplement
-  );
-  const bairroEntrega = firstNonEmpty(
-    payload.bairroEntrega,
-    payload.shippingNeighborhood,
-    payload.deliveryNeighborhood
-  );
-  const cidadeEntrega = firstNonEmpty(payload.cidadeEntrega, payload.shippingCity, payload.deliveryCity);
-  const cepEntrega = firstNonEmpty(payload.cepEntrega, payload.shippingZipCode, payload.deliveryZipCode, payload.cep);
-  const deliveryReference = getDeliveryReference(payload);
-
-  const streetLine = [ruaEntrega, numeroEntrega].filter(Boolean).join(', ');
-  const withComp = [streetLine, complementoEntrega ? `Comp: ${complementoEntrega}` : '']
-    .filter(Boolean)
-    .join(' ');
-  if (withComp) wrapText(withComp, receiptWidth).forEach((l) => pushLine(l, 'normal'));
-  if (bairroEntrega) wrapText(`Bairro: ${bairroEntrega}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
-  if (deliveryReference) wrapText(`Ref.: ${deliveryReference}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
-  if (cidadeEntrega || cepEntrega) {
-    const cidadeCep = [cidadeEntrega, cepEntrega ? `CEP: ${cepEntrega}` : ''].filter(Boolean).join(' | ');
-    wrapText(cidadeCep, receiptWidth).forEach((l) => pushLine(l, 'normal'));
-  }
-} else if (deliveryTypeLower === 'dine_in' && payload.identificadorMesaSenha) {
-  pushLine('', 'normal');
-  wrapText(`Mesa: ${payload.identificadorMesaSenha}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
-} else if (deliveryTypeLower === 'pickup') {
-  pushLine('', 'normal');
-  wrapText('Cliente retira no estabelecimento', receiptWidth).forEach((l) => pushLine(l, 'normal'));
-}
+const deliveryTypeLabel = formatDeliveryType(deliveryTypeRaw);
+pushLine(center(deliveryTypeLabel, receiptWidth), 'titleCenter');
+pushLine('', 'normal');
 
 // PDV usa `usuario` = USUARIO_BALCAO: não exibir esse login como nome do cliente.
 const isCounterUser = ['USUARIO_BALCAO'].includes(
@@ -716,6 +679,33 @@ const hasClientBlock = !!(
   clientEmail
 );
 
+const ruaEntrega = firstNonEmpty(payload.ruaEntrega, payload.shippingStreet, payload.deliveryStreet);
+const numeroEntrega = firstNonEmpty(payload.numeroEntrega, payload.shippingNumber, payload.deliveryNumber);
+const complementoEntrega = firstNonEmpty(
+  payload.complementoEntrega,
+  payload.shippingComplement,
+  payload.deliveryComplement
+);
+const bairroEntrega = firstNonEmpty(
+  payload.bairroEntrega,
+  payload.shippingNeighborhood,
+  payload.deliveryNeighborhood
+);
+const cidadeEntrega = firstNonEmpty(payload.cidadeEntrega, payload.shippingCity, payload.deliveryCity);
+const cepEntrega = firstNonEmpty(payload.cepEntrega, payload.shippingZipCode, payload.deliveryZipCode, payload.cep);
+const deliveryReference = getDeliveryReference(payload);
+const hasDeliveryAddress = !!(
+  ruaEntrega ||
+  numeroEntrega ||
+  complementoEntrega ||
+  bairroEntrega ||
+  cidadeEntrega ||
+  cepEntrega ||
+  deliveryReference
+);
+const hasDineInInfo = deliveryTypeLower === 'dine_in' && !!payload.identificadorMesaSenha;
+const showClientDeliveryBlock = hasClientBlock || (deliveryTypeLower === 'delivery' && hasDeliveryAddress) || hasDineInInfo;
+
 // Linha de valor (rótulo à esquerda, valor à direita) alinhada à largura.
 function moneyRow(label, value) {
   const valueStr = brl(value);
@@ -723,14 +713,32 @@ function moneyRow(label, value) {
   return `${padRight(label, labelWidth)}${padLeft(valueStr, valueStr.length)}`;
 }
 
-// Dados do cliente
-if (hasClientBlock) {
-  pushLine('', 'normal');
+// Cliente + endereço (ou mesa) no mesmo bloco
+if (showClientDeliveryBlock) {
   pushLine(sectionHeader('CLIENTE'), 'normal');
-  wrapText(`Nome: ${clientName}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
-  if (clientPhone) wrapText(`Telefone: ${clientPhone}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
-  if (!isCounterUser && clientEmail) wrapText(`E-mail: ${clientEmail}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
-  if (totalOrders) wrapText(`Pedidos: ${totalOrders}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  if (hasClientBlock) {
+    wrapText(`Nome: ${clientName}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    if (clientPhone) wrapText(`Telefone: ${clientPhone}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    if (!isCounterUser && clientEmail) wrapText(`E-mail: ${clientEmail}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    if (totalOrders) wrapText(`Pedidos: ${totalOrders}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  }
+  if (deliveryTypeLower === 'delivery' && hasDeliveryAddress) {
+    if (hasClientBlock) pushLine('', 'normal');
+    const streetLine = [ruaEntrega, numeroEntrega].filter(Boolean).join(', ');
+    const withComp = [streetLine, complementoEntrega ? `Comp: ${complementoEntrega}` : '']
+      .filter(Boolean)
+      .join(' ');
+    if (withComp) wrapText(withComp, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    if (bairroEntrega) wrapText(`Bairro: ${bairroEntrega}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    if (deliveryReference) wrapText(`Ref.: ${deliveryReference}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    if (cidadeEntrega || cepEntrega) {
+      const cidadeCep = [cidadeEntrega, cepEntrega ? `CEP: ${cepEntrega}` : ''].filter(Boolean).join(' | ');
+      wrapText(cidadeCep, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    }
+  } else if (hasDineInInfo) {
+    if (hasClientBlock) pushLine('', 'normal');
+    wrapText(`Mesa: ${payload.identificadorMesaSenha}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  }
 }
 
 // Itens
