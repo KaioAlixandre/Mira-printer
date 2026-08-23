@@ -83,14 +83,6 @@ function formatPaymentMethod(method) {
   return method || '-';
 }
 
-function formatDeliveryType(type) {
-  const raw = String(type || '').toLowerCase();
-  if (raw === 'delivery') return 'Entrega';
-  if (raw === 'pickup') return 'Retirada';
-  if (raw === 'dine_in') return 'Mesa';
-  return type || '-';
-}
-
 function firstNonEmpty(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
@@ -98,6 +90,32 @@ function firstNonEmpty(...values) {
     if (text) return text;
   }
   return '';
+}
+
+function getMesaLabel(orderPayload) {
+  return firstNonEmpty(
+    orderPayload?.identificadorMesaSenha,
+    orderPayload?.mesaNome,
+    orderPayload?.mesa?.nome,
+    orderPayload?.mesaId != null && Number(orderPayload.mesaId) > 0 ? `Mesa ${orderPayload.mesaId}` : ''
+  );
+}
+
+function isMesaOrder(orderPayload, deliveryType) {
+  const raw = String(deliveryType || orderPayload?.tipoEntrega || orderPayload?.deliveryType || '').toLowerCase();
+  if (raw !== 'dine_in') return false;
+  return Boolean(getMesaLabel(orderPayload));
+}
+
+function formatDeliveryType(type, orderPayload = null) {
+  const raw = String(type || '').toLowerCase();
+  if (raw === 'delivery') return 'Entrega';
+  if (raw === 'pickup') return 'Retirada';
+  if (raw === 'dine_in') {
+    const source = orderPayload || (typeof payload !== 'undefined' ? payload : null);
+    return isMesaOrder(source, raw) ? 'Mesa' : 'Consumo no local';
+  }
+  return type || '-';
 }
 
 function parseOptionsSnapshot(raw) {
@@ -616,9 +634,12 @@ if (previsaoEntrega) {
   );
 }
 
-// Entrega / Retirada / Mesa — destaque abaixo da data (sem subtítulo)
+// Entrega / Retirada / Consumo no local / Mesa — destaque abaixo da data (sem subtítulo)
 const deliveryTypeLower = String(deliveryTypeRaw).toLowerCase();
-const deliveryTypeLabel = formatDeliveryType(deliveryTypeRaw);
+const mesaLabel = getMesaLabel(payload);
+const isMesaDineIn = deliveryTypeLower === 'dine_in' && Boolean(mesaLabel);
+const isConsumoLocal = deliveryTypeLower === 'dine_in' && !isMesaDineIn;
+const deliveryTypeLabel = formatDeliveryType(deliveryTypeRaw, payload);
 pushLine(center(deliveryTypeLabel, receiptWidth), 'titleCenter');
 pushLine('', 'normal');
 
@@ -703,8 +724,12 @@ const hasDeliveryAddress = !!(
   cepEntrega ||
   deliveryReference
 );
-const hasDineInInfo = deliveryTypeLower === 'dine_in' && !!payload.identificadorMesaSenha;
-const showClientDeliveryBlock = hasClientBlock || (deliveryTypeLower === 'delivery' && hasDeliveryAddress) || hasDineInInfo;
+const hasDineInInfo = isMesaDineIn;
+const showClientDeliveryBlock =
+  hasClientBlock ||
+  (deliveryTypeLower === 'delivery' && hasDeliveryAddress) ||
+  hasDineInInfo ||
+  isConsumoLocal;
 
 // Linha de valor (rótulo à esquerda, valor à direita) alinhada à largura.
 function moneyRow(label, value) {
@@ -713,7 +738,7 @@ function moneyRow(label, value) {
   return `${padRight(label, labelWidth)}${padLeft(valueStr, valueStr.length)}`;
 }
 
-// Cliente + endereço (ou mesa) no mesmo bloco
+// Cliente + endereço (ou mesa / consumo no local) no mesmo bloco
 if (showClientDeliveryBlock) {
   pushLine(sectionHeader('CLIENTE'), 'normal');
   if (hasClientBlock) {
@@ -737,7 +762,10 @@ if (showClientDeliveryBlock) {
     }
   } else if (hasDineInInfo) {
     if (hasClientBlock) pushLine('', 'normal');
-    wrapText(`Mesa: ${payload.identificadorMesaSenha}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    wrapText(`Mesa: ${mesaLabel}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+  } else if (isConsumoLocal) {
+    if (hasClientBlock) pushLine('', 'normal');
+    wrapText('Cliente consome no local', receiptWidth).forEach((l) => pushLine(l, 'normal'));
   }
 }
 
@@ -803,11 +831,16 @@ if (orderNotes) {
 // Pagamento
 pushLine('', 'normal');
 pushLine(sectionHeader('PAGAMENTO'), 'normal');
-wrapText(`Forma de Pagamento: ${paymentMethod}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
 
-if (isPixPayment) pushLine('>>> Pago via PIX - nao cobrar!', 'normal');
-if (isCashOnDeliveryPayment) pushLine('>>> Dinheiro na entrega - cobrar!', 'normal');
-if (isCardPayment) pushLine('>>> Cartao na entrega - cobrar!', 'normal');
+let paymentHint = '';
+if (isPixPayment) paymentHint = 'Pago via PIX - nao cobrar!';
+else if (isCashOnDeliveryPayment) paymentHint = 'Dinheiro na entrega - cobrar!';
+else if (isCardPayment) paymentHint = 'Cartao na entrega - cobrar!';
+else if (paymentMethod && paymentMethod !== '-') paymentHint = paymentMethod;
+
+if (paymentHint) {
+  wrapText(paymentHint, receiptWidth).forEach((l) => pushLine(center(l, receiptWidth), 'normal'));
+}
 
 if (isCashOnDeliveryPayment && payload.precisaTroco && payload.valorTroco) {
   const trocaPara = Number(payload.valorTroco || 0);

@@ -2,10 +2,12 @@ const { WebSocketServer } = require('ws');
 
 /**
  * Servidor WebSocket local para impressão manual disparada pelo painel (Frontend).
- * Protocolo: { type: "print_order", version: 1, order, user?, flavors?, customerOrderCount? }
+ * Protocolo:
+ *   { type: "print_order", version: 1, order, user?, flavors?, customerOrderCount? }
+ *   { type: "print_caixa", version: 1, caixa }
  * Resposta:  { type: "print_ack", orderId, ok, error? }
  */
-function createPrintWsServer({ port, host, onPrintOrder }) {
+function createPrintWsServer({ port, host, onPrintOrder, onPrintCaixa }) {
   const listenHost = host || '127.0.0.1';
   const listenPort = Number(port) || 8787;
 
@@ -16,7 +18,7 @@ function createPrintWsServer({ port, host, onPrintOrder }) {
     console.log(`[print-ws] cliente conectado (${from})`);
 
     ws.on('message', (data) => {
-      void handleMessage(ws, data, onPrintOrder);
+      void handleMessage(ws, data, { onPrintOrder, onPrintCaixa });
     });
 
     ws.on('close', () => {
@@ -44,7 +46,7 @@ function createPrintWsServer({ port, host, onPrintOrder }) {
   };
 }
 
-async function handleMessage(ws, data, onPrintOrder) {
+async function handleMessage(ws, data, handlers = {}) {
   let msg;
   try {
     msg = JSON.parse(String(data || ''));
@@ -53,17 +55,37 @@ async function handleMessage(ws, data, onPrintOrder) {
     return;
   }
 
-  if (!msg || msg.type !== 'print_order' || msg.version !== 1) {
+  if (!msg || msg.version !== 1) {
+    return;
+  }
+
+  if (msg.type === 'print_caixa') {
+    const caixaId = msg.caixa?.id ?? 'caixa';
+    try {
+      if (typeof handlers.onPrintCaixa !== 'function') {
+        throw new Error('Impressão de caixa não configurada');
+      }
+      await handlers.onPrintCaixa(msg);
+      sendAck(ws, caixaId, true);
+    } catch (err) {
+      const message = err?.message || String(err);
+      console.error('[print-ws] falha ao imprimir fechamento de caixa', caixaId, message);
+      sendAck(ws, caixaId, false, message);
+    }
+    return;
+  }
+
+  if (msg.type !== 'print_order') {
     return;
   }
 
   const orderId = msg.order?.id ?? msg.order?.orderId ?? null;
 
   try {
-    if (typeof onPrintOrder !== 'function') {
+    if (typeof handlers.onPrintOrder !== 'function') {
       throw new Error('Servidor de impressão não configurado');
     }
-    await onPrintOrder(msg);
+    await handlers.onPrintOrder(msg);
     sendAck(ws, orderId, true);
   } catch (err) {
     const message = err?.message || String(err);

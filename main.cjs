@@ -82,6 +82,7 @@ function normalizePrintSettings(raw) {
     fontScalePercent,
     fontScale: fontScaleFromPercent(fontScalePercent),
     lineHeight,
+    printSecondCopy: src.printSecondCopy === true,
     printBellEnabled: src.printBellEnabled !== false,
     printBellVolume: clampNumber(src.printBellVolume, 0, 1, 0.88),
   };
@@ -200,6 +201,14 @@ function getSettings(merged, session) {
     path.join(__dirname, 'backend', 'scripts', 'auto_print_preparing_orders.js');
   scriptPath = path.isAbsolute(scriptPath) ? scriptPath : path.resolve(__dirname, scriptPath);
 
+  let caixaScriptPath =
+    merged.PRINT_CAIXA_SCRIPT_PATH ||
+    merged.printCaixaScriptPath ||
+    path.join(__dirname, 'backend', 'scripts', 'print_caixa_fechamento.js');
+  caixaScriptPath = path.isAbsolute(caixaScriptPath)
+    ? caixaScriptPath
+    : path.resolve(__dirname, caixaScriptPath);
+
   const triggers = (merged.PRINT_TRIGGERS || merged.printTriggers || 'being_prepared')
     .toString()
     .trim()
@@ -219,6 +228,7 @@ function getSettings(merged, session) {
     apiUrl,
     lojaId,
     scriptPath,
+    caixaScriptPath,
     triggers,
     dedupPolicy,
     useElectronAsNode,
@@ -540,12 +550,19 @@ function buildPayloadFromPrintOrderMessage(msg, bundle) {
   return payload;
 }
 
-function enqueuePrintAndWait(bundle, payload) {
+function enqueuePrintAndWait(bundle, payload, scriptPathOverride, copies = 1) {
   return new Promise((resolve, reject) => {
-    enqueuePrint(bundle, payload, (err) => {
-      if (err) reject(err);
-      else resolve();
-    });
+    enqueuePrintTimes(
+      bundle,
+      payload,
+      copies,
+      (err) => {
+        if (err) reject(err);
+        else resolve();
+      },
+      null,
+      scriptPathOverride
+    );
   });
 }
 
@@ -575,7 +592,52 @@ async function handlePrintOrderFromWebSocket(msg) {
 
   const toSend = buildPayloadFromPrintOrderMessage(msg, bundle);
   setLastPrint(`Pedido ${orderId} (impressão manual Web)`);
-  await enqueuePrintAndWait(bundle, toSend);
+  await enqueuePrintAndWait(bundle, toSend, null, resolveOrderPrintCopies());
+}
+
+async function handlePrintCaixaFromWebSocket(msg) {
+  const bundle = getPrintBundle();
+  const caixa = msg?.caixa;
+  if (!caixa || typeof caixa !== 'object') {
+    throw new Error('Campo "caixa" ausente na mensagem');
+  }
+
+  const { settings } = bundle;
+  if (settings.lojaId > 0) {
+    const caixaLoja = Number(caixa.lojaId ?? caixa.loja?.id);
+    if (Number.isFinite(caixaLoja) && caixaLoja !== settings.lojaId) {
+      throw new Error('Fechamento pertence a outra loja');
+    }
+  }
+
+  if (!fs.existsSync(settings.caixaScriptPath)) {
+    throw new Error('Script de impressão de caixa não encontrado');
+  }
+
+  const sessionStoreName = getSessionStoreName();
+  const storeName =
+    (caixa.nomeLoja && String(caixa.nomeLoja).trim()) ||
+    (caixa.loja?.nome && String(caixa.loja.nome).trim()) ||
+    sessionStoreName ||
+    'Mira Delivery';
+
+  const toSend = {
+    kind: 'caixa_fechamento',
+    id: caixa.id ?? `caixa-${Date.now()}`,
+    ...caixa,
+    nomeLoja: storeName,
+    loja: {
+      id: caixa.lojaId ?? caixa.loja?.id ?? settings.lojaId,
+      nome: storeName,
+    },
+    caixa: {
+      ...caixa,
+      nomeLoja: storeName,
+    },
+  };
+
+  setLastPrint(`Fechamento de caixa ${toSend.id} (impressão Web)`);
+  await enqueuePrintAndWait(bundle, toSend, settings.caixaScriptPath);
 }
 
 function startPrintWebSocketServer(settings) {
@@ -595,6 +657,7 @@ function startPrintWebSocketServer(settings) {
     port: settings.printWsPort,
     host: settings.printWsHost,
     onPrintOrder: handlePrintOrderFromWebSocket,
+    onPrintCaixa: handlePrintCaixaFromWebSocket,
   });
 }
 
@@ -683,7 +746,7 @@ function processPrintQueue(bundle) {
 
   runPrintScript(
     bundle.merged,
-    bundle.settings.scriptPath,
+    next.scriptPath || bundle.settings.scriptPath,
     next.payload,
     bundle.settings.useElectronAsNode,
     (err) => {
@@ -701,13 +764,42 @@ function processPrintQueue(bundle) {
   );
 }
 
-function enqueuePrint(bundle, payload, onDone, printSettingsOverride) {
+function enqueuePrint(bundle, payload, onDone, printSettingsOverride, scriptPathOverride) {
   printQueue.push({
     payload,
     onDone: onDone || null,
     printSettingsOverride: printSettingsOverride || null,
+    scriptPath: scriptPathOverride || null,
   });
   processPrintQueue(bundle);
+}
+
+function resolveOrderPrintCopies(printSettings) {
+  const s = printSettings || loadPrintSettings();
+  return s.printSecondCopy ? 2 : 1;
+}
+
+function enqueuePrintTimes(bundle, payload, times, onDone, printSettingsOverride, scriptPathOverride) {
+  const n = Math.max(1, Number(times) || 1);
+  if (n === 1) {
+    enqueuePrint(bundle, payload, onDone, printSettingsOverride, scriptPathOverride);
+    return;
+  }
+
+  let remaining = n;
+  let firstErr = null;
+  const doneOne =
+    typeof onDone === 'function'
+      ? (err) => {
+          if (err && !firstErr) firstErr = err;
+          remaining -= 1;
+          if (remaining === 0) onDone(firstErr);
+        }
+      : null;
+
+  for (let i = 0; i < n; i += 1) {
+    enqueuePrint(bundle, payload, doneOne, printSettingsOverride, scriptPathOverride);
+  }
 }
 
 function buildTestPrintPayload(bundle) {
@@ -822,7 +914,7 @@ function handleIncomingEvent(bundle, eventName, rawPayload) {
     orderId != null ? `Pedido ${orderId} (${kind})` : `${kind} @ ${new Date().toLocaleString('pt-BR')}`
   );
 
-  enqueuePrint(bundle, toSend);
+  enqueuePrintTimes(bundle, toSend, resolveOrderPrintCopies());
 }
 
 function connectSocket(bundle, token) {
@@ -1250,7 +1342,13 @@ function registerIpc() {
     setLastError(null);
 
     await new Promise((resolve, reject) => {
-      enqueuePrint(bundle, payload, (err) => (err ? reject(err) : resolve()), printSettings);
+      enqueuePrintTimes(
+        bundle,
+        payload,
+        resolveOrderPrintCopies(printSettings),
+        (err) => (err ? reject(err) : resolve()),
+        printSettings
+      );
     });
 
     return { ok: true };

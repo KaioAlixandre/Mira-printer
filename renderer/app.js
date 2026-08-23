@@ -10,6 +10,7 @@ const printerTargetSelectEl = document.getElementById('printerTargetSelect');
 const printerTargetInputEl = document.getElementById('printerTargetInput');
 const btnPrintSize = document.getElementById('btnPrintSize');
 const btnSavePrintEl = document.getElementById('btnSavePrint');
+const printSecondCopyEl = document.getElementById('printSecondCopy');
 const printBellEnabledEl = document.getElementById('printBellEnabled');
 const printBellVolumeEl = document.getElementById('printBellVolume');
 const btnMinimize = document.getElementById('btnMinimize');
@@ -97,6 +98,7 @@ function applyPrintSettings(settings) {
   if (settings.printerTarget) {
     printerTargetSelectEl.value = settings.printerTarget;
   }
+  printSecondCopyEl.checked = !!settings.printSecondCopy;
   printBellEnabledEl.checked = settings.printBellEnabled !== false;
   const pct = Math.round((settings.printBellVolume ?? 0.88) * 100);
   printBellVolumeEl.value = String(Math.min(100, Math.max(0, pct)));
@@ -125,6 +127,7 @@ btnSavePrintEl.addEventListener('click', async () => {
     ...currentPrintSettings,
     printerType: 'windows_spooler',
     printerTarget: printerTargetInputEl.value.trim(),
+    printSecondCopy: printSecondCopyEl.checked,
     printBellEnabled: printBellEnabledEl.checked,
     printBellVolume: Number(printBellVolumeEl.value || 0) / 100,
   });
