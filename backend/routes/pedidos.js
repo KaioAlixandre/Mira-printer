@@ -1139,7 +1139,9 @@ router.post('/balcao', authenticateToken, authorizeAdminOrWaiter, async (req, re
                         }
                     },
                     pagamento: true,
-                    usuario: true
+                    usuario: true,
+                    mesa: { select: { id: true, nome: true } },
+                    criadoPor: { select: { id: true, nomeUsuario: true } }
                 }
             });
 
@@ -1152,6 +1154,8 @@ router.post('/balcao', authenticateToken, authorizeAdminOrWaiter, async (req, re
 
         const newOrderWithParsedOptions = {
             ...newOrder,
+            mesaNome: newOrder.mesa?.nome || null,
+            criadoPorGarcomNome: newOrder.criadoPor?.nomeUsuario || null,
             itens_pedido: (newOrder.itens_pedido || []).map(item => ({
                 ...item,
                 opcoesSelecionadasSnapshot: parseOptionsSnapshot(item.opcoesSelecionadasSnapshot)
@@ -1586,6 +1590,8 @@ router.put(
                         telefone: true
                     }
                 },
+                mesa: { select: { id: true, nome: true } },
+                criadoPor: { select: { id: true, nomeUsuario: true } },
                 pagamento: {
                     select: {
                         metodo: true
@@ -1597,6 +1603,8 @@ router.put(
 
         // Calcular dailyNumber para usar nas notificações
         updatedOrder.dailyNumber = await getDailyNumber(updatedOrder.id, updatedOrder.lojaId, updatedOrder.criadoEm);
+        updatedOrder.mesaNome = updatedOrder.mesa?.nome || null;
+        updatedOrder.criadoPorGarcomNome = updatedOrder.criadoPor?.nomeUsuario || null;
 
         // Enviar notificação de pagamento confirmado se mudou de "pending_payment" para "being_prepared" (PIX)
         if (currentOrder.status === 'pending_payment' && status === 'being_prepared') {

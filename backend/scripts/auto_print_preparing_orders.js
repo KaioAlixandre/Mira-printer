@@ -101,6 +101,18 @@ function getMesaLabel(orderPayload) {
   );
 }
 
+function getGarcomNome(orderPayload) {
+  return firstNonEmpty(
+    orderPayload?.criadoPorGarcomNome,
+    orderPayload?.criadoPor?.nomeUsuario,
+    orderPayload?.criadoPor?.username,
+    orderPayload?.criadoPor?.nome,
+    orderPayload?.garcomNome,
+    orderPayload?.garcom?.nomeUsuario,
+    orderPayload?.garcom?.nome
+  );
+}
+
 function isMesaOrder(orderPayload, deliveryType) {
   const raw = String(deliveryType || orderPayload?.tipoEntrega || orderPayload?.deliveryType || '').toLowerCase();
   if (raw !== 'dine_in') return false;
@@ -654,32 +666,53 @@ function skipCounterPlaceholderName(value) {
   return t;
 }
 
-// Dados do cliente (PDV: telefone do pedido antes do usuário balcão)
+/** Telefone sintético do usuário balcão: 9999999999 + lojaId (ex.: 9999999999001). */
+function isPlaceholderCounterPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return true;
+  return /^9999999999\d{0,6}$/.test(digits);
+}
+
+function isPlaceholderCounterEmail(value) {
+  const t = String(value || '').trim().toLowerCase();
+  return !t || t.endsWith('@sistema.local') || /^balcao_\d+@/.test(t);
+}
+
+function sanitizeClientPhone(value) {
+  const phone = firstNonEmpty(value);
+  if (!phone || isPlaceholderCounterPhone(phone)) return '';
+  return phone;
+}
+
+// Dados do cliente (PDV: só telefone real do pedido; nunca o genérico do USUARIO_BALCAO)
 const clientPhone = isCounterUser
   ? firstNonEmpty(
-      payload.telefoneEntrega,
-      payload.shippingPhone,
-      payload.usuario?.telefone,
-      payload.user?.phone,
-      payload.cliente?.telefone,
-      payload.customer?.phone
+      sanitizeClientPhone(payload.telefoneEntrega),
+      sanitizeClientPhone(payload.shippingPhone),
+      sanitizeClientPhone(payload.cliente?.telefone),
+      sanitizeClientPhone(payload.customer?.phone)
     )
   : firstNonEmpty(
-      payload.usuario?.telefone,
-      payload.user?.phone,
-      payload.telefoneEntrega,
-      payload.shippingPhone,
-      payload.cliente?.telefone,
-      payload.customer?.phone
+      sanitizeClientPhone(payload.usuario?.telefone),
+      sanitizeClientPhone(payload.user?.phone),
+      sanitizeClientPhone(payload.telefoneEntrega),
+      sanitizeClientPhone(payload.shippingPhone),
+      sanitizeClientPhone(payload.cliente?.telefone),
+      sanitizeClientPhone(payload.customer?.phone)
     );
-const clientEmail = firstNonEmpty(payload.usuario?.email, payload.user?.email, payload.cliente?.email);
+const clientEmail = isCounterUser
+  ? ''
+  : (() => {
+      const email = firstNonEmpty(payload.usuario?.email, payload.user?.email, payload.cliente?.email);
+      return isPlaceholderCounterEmail(email) ? '' : email;
+    })();
 let clientName = firstNonEmpty(
   payload.nomeClienteAvulso,
   skipCounterPlaceholderName(payload.usuario?.nomeUsuario),
   skipCounterPlaceholderName(payload.usuario?.nome),
   skipCounterPlaceholderName(payload.usuario?.username),
-  payload.user?.nome,
-  payload.user?.username,
+  skipCounterPlaceholderName(payload.user?.nome),
+  skipCounterPlaceholderName(payload.user?.username),
   payload.cliente?.nome,
   payload.customer?.name
 );
@@ -693,11 +726,13 @@ if (!clientName) {
 const totalOrders = firstNonEmpty(payload.totalPedidos, payload.usuario?.totalPedidos, payload.user?.totalPedidos);
 const hasClientBlock = !!(
   payload.nomeClienteAvulso ||
-  payload.usuario?.nomeUsuario ||
-  payload.usuario?.nome ||
-  payload.user?.username ||
+  (!isCounterUser &&
+    (payload.usuario?.nomeUsuario ||
+      payload.usuario?.nome ||
+      payload.user?.username ||
+      clientEmail)) ||
   clientPhone ||
-  clientEmail
+  (clientName && clientName !== '-')
 );
 
 const ruaEntrega = firstNonEmpty(payload.ruaEntrega, payload.shippingStreet, payload.deliveryStreet);
@@ -762,7 +797,11 @@ if (showClientDeliveryBlock) {
     }
   } else if (hasDineInInfo) {
     if (hasClientBlock) pushLine('', 'normal');
-    wrapText(`Mesa: ${mesaLabel}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    wrapText(`${mesaLabel}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    const garcomNome = getGarcomNome(payload);
+    if (garcomNome) {
+      wrapText(`Garcom: ${garcomNome}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    }
   } else if (isConsumoLocal) {
     if (hasClientBlock) pushLine('', 'normal');
     wrapText('Cliente consome no local', receiptWidth).forEach((l) => pushLine(l, 'normal'));
@@ -828,24 +867,26 @@ if (orderNotes) {
   wrapText(orderNotes, receiptWidth).forEach((l) => pushLine(l, 'normal'));
 }
 
-// Pagamento
-pushLine('', 'normal');
-pushLine(sectionHeader('PAGAMENTO'), 'normal');
+// Pagamento (pedidos de mesa não exibem forma de pagamento)
+if (!isMesaDineIn) {
+  pushLine('', 'normal');
+  pushLine(sectionHeader('PAGAMENTO'), 'normal');
 
-let paymentHint = '';
-if (isPixPayment) paymentHint = 'Pago via PIX - nao cobrar!';
-else if (isCashOnDeliveryPayment) paymentHint = 'Dinheiro na entrega - cobrar!';
-else if (isCardPayment) paymentHint = 'Cartao na entrega - cobrar!';
-else if (paymentMethod && paymentMethod !== '-') paymentHint = paymentMethod;
+  let paymentHint = '';
+  if (isPixPayment) paymentHint = 'Pago via PIX - nao cobrar!';
+  else if (isCashOnDeliveryPayment) paymentHint = 'Dinheiro na entrega - cobrar!';
+  else if (isCardPayment) paymentHint = 'Cartao na entrega - cobrar!';
+  else if (paymentMethod && paymentMethod !== '-') paymentHint = paymentMethod;
 
-if (paymentHint) {
-  wrapText(paymentHint, receiptWidth).forEach((l) => pushLine(center(l, receiptWidth), 'normal'));
-}
+  if (paymentHint) {
+    wrapText(paymentHint, receiptWidth).forEach((l) => pushLine(center(l, receiptWidth), 'normal'));
+  }
 
-if (isCashOnDeliveryPayment && payload.precisaTroco && payload.valorTroco) {
-  const trocaPara = Number(payload.valorTroco || 0);
-  pushLine(moneyRow('Pago com:', trocaPara), 'normal');
-  pushLine(moneyRow('Troco:', trocaPara - total), 'normal');
+  if (isCashOnDeliveryPayment && payload.precisaTroco && payload.valorTroco) {
+    const trocaPara = Number(payload.valorTroco || 0);
+    pushLine(moneyRow('Pago com:', trocaPara), 'normal');
+    pushLine(moneyRow('Troco:', trocaPara - total), 'normal');
+  }
 }
 
 // Totais

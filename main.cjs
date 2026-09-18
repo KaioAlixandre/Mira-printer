@@ -300,9 +300,17 @@ function normalizePayloadForScript(payload, kind) {
       base.pedidoId ??
       base.pedido?.id ??
       null;
+    const criadoPorGarcomNome =
+      base.criadoPorGarcomNome ||
+      base.criadoPor?.nomeUsuario ||
+      base.criadoPor?.username ||
+      null;
+    const mesaNome = base.mesaNome || base.mesa?.nome || null;
     return {
       ...base,
       id: normalizedId,
+      criadoPorGarcomNome,
+      mesaNome,
       _printKind: kind,
       _source: 'mira-printer-agent',
     };
