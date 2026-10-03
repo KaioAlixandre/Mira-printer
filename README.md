@@ -85,6 +85,23 @@ npm run dist
 
 Saída em `release/` (NSIS + portable). O projeto usa `signAndEditExecutable: false` para evitar falhas de extração de ferramentas de assinatura em ambientes Windows sem symlink; ajuste para CI com assinatura real.
 
+## Atualização automática
+
+O app instalado (NSIS) verifica novas versões em [MiraPrinter-releases](https://github.com/KaioAlixandre/MiraPrinter-releases/releases) 15 s após abrir e a cada 4 horas. A atualização é baixada em segundo plano e instalada em modo silencioso assim que a fila de impressão estiver vazia; o app reabre sozinho. A versão portátil não se atualiza.
+
+Para publicar uma versão:
+
+1. Aumente `version` no `package.json` (ex.: `1.2.4` → `1.2.5`). Clientes só atualizam se a versão publicada for maior.
+2. Crie um token do GitHub com permissão de escrita em *Contents* no repositório `MiraPrinter-releases`.
+3. Publique:
+
+```powershell
+$env:GH_TOKEN = "seu_token"
+npm run release
+```
+
+Isso gera os instaladores e cria a release `vX.Y.Z` com `latest.yml`, o `.exe` e o `.blockmap` (arquivos que o updater lê). Não renomeie nem apague esses arquivos da release.
+
 ### Assinatura de código (opcional)
 
 Use certificado Authenticode (`signtool` da Windows SDK) no `.exe` / instalador.

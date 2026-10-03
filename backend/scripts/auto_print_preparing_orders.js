@@ -185,6 +185,15 @@ function resolveItemName(item) {
   );
 }
 
+function resolveItemDescription(item) {
+  return firstNonEmpty(
+    item?.produto?.descricao,
+    item?.produto?.description,
+    item?.product?.descricao,
+    item?.product?.description
+  );
+}
+
 function getItemAdditionalsDetailed(item) {
   const result = [];
   const resolveAdditionalValue = (additional) => Number(
@@ -429,6 +438,8 @@ const storeName =
   process.env.STORE_NAME ||
   'MIRA DELIVERY';
 const printCfg = payload.__autoPrintConfig || {};
+const printItemDescription =
+  printCfg.printItemDescription === true || payload.printItemDescription === true;
 const localPrinterType = String(process.env.MIRA_PRINTER_TYPE || '').trim();
 const localPrinterTarget = String(process.env.MIRA_PRINTER_TARGET || '').trim();
 const localPaperWidth = Number(process.env.MIRA_PAPER_WIDTH_MM || 0);
@@ -836,6 +847,13 @@ if (!items.length) {
         pushLine(l, 'normal');
       }
     });
+
+    if (printItemDescription) {
+      const description = resolveItemDescription(item);
+      if (description) {
+        wrapText(description, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+      }
+    }
 
     if (isCustomProduct(item)) pushLine('  Personalizado', 'normal');
 

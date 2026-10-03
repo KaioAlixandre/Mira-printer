@@ -5,9 +5,10 @@ const { WebSocketServer } = require('ws');
  * Protocolo:
  *   { type: "print_order", version: 1, order, user?, flavors?, customerOrderCount? }
  *   { type: "print_caixa", version: 1, caixa }
+ *   { type: "print_conferencia", version: 1, conferencia }
  * Resposta:  { type: "print_ack", orderId, ok, error? }
  */
-function createPrintWsServer({ port, host, onPrintOrder, onPrintCaixa }) {
+function createPrintWsServer({ port, host, onPrintOrder, onPrintCaixa, onPrintConferencia }) {
   const listenHost = host || '127.0.0.1';
   const listenPort = Number(port) || 8787;
 
@@ -18,7 +19,7 @@ function createPrintWsServer({ port, host, onPrintOrder, onPrintCaixa }) {
     console.log(`[print-ws] cliente conectado (${from})`);
 
     ws.on('message', (data) => {
-      void handleMessage(ws, data, { onPrintOrder, onPrintCaixa });
+      void handleMessage(ws, data, { onPrintOrder, onPrintCaixa, onPrintConferencia });
     });
 
     ws.on('close', () => {
@@ -71,6 +72,22 @@ async function handleMessage(ws, data, handlers = {}) {
       const message = err?.message || String(err);
       console.error('[print-ws] falha ao imprimir fechamento de caixa', caixaId, message);
       sendAck(ws, caixaId, false, message);
+    }
+    return;
+  }
+
+  if (msg.type === 'print_conferencia') {
+    const conferenciaId = msg.conferencia?.id ?? msg.conferencia?.mesaNome ?? 'conferencia';
+    try {
+      if (typeof handlers.onPrintConferencia !== 'function') {
+        throw new Error('Impressão de conferência não configurada');
+      }
+      await handlers.onPrintConferencia(msg);
+      sendAck(ws, conferenciaId, true);
+    } catch (err) {
+      const message = err?.message || String(err);
+      console.error('[print-ws] falha ao imprimir conferência de mesa', conferenciaId, message);
+      sendAck(ws, conferenciaId, false, message);
     }
     return;
   }

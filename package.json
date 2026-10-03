@@ -1,6 +1,6 @@
 {
   "name": "mira-printer-agent",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Agente Electron de impressão automática (Socket.IO + spawn script)",
   "main": "main.cjs",
   "author": "",
@@ -10,7 +10,8 @@
     "dev": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "dist:portable": "electron-builder --win portable"
+    "dist:portable": "electron-builder --win portable",
+    "release": "electron-builder --win --publish always"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -66,7 +67,7 @@
       {
         "provider": "github",
         "owner": "KaioAlixandre",
-        "repo": "Mira-printer",
+        "repo": "MiraPrinter-releases",
         "releaseType": "release"
       }
     ],

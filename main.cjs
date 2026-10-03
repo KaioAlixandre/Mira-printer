@@ -209,6 +209,14 @@ function getSettings(merged, session) {
     ? caixaScriptPath
     : path.resolve(__dirname, caixaScriptPath);
 
+  let conferenciaScriptPath =
+    merged.PRINT_CONFERENCIA_SCRIPT_PATH ||
+    merged.printConferenciaScriptPath ||
+    path.join(__dirname, 'backend', 'scripts', 'print_mesa_conferencia.js');
+  conferenciaScriptPath = path.isAbsolute(conferenciaScriptPath)
+    ? conferenciaScriptPath
+    : path.resolve(__dirname, conferenciaScriptPath);
+
   const triggers = (merged.PRINT_TRIGGERS || merged.printTriggers || 'being_prepared')
     .toString()
     .trim()
@@ -229,6 +237,7 @@ function getSettings(merged, session) {
     lojaId,
     scriptPath,
     caixaScriptPath,
+    conferenciaScriptPath,
     triggers,
     dedupPolicy,
     useElectronAsNode,
@@ -371,7 +380,13 @@ let dedupStore = null;
 let bellDedupStore = null;
 let configBundle = null;
 let printWsServer = null;
-const lastStatus = { connection: 'desconectado', lastPrint: null, lastError: null };
+const lastStatus = {
+  connection: 'desconectado',
+  lastPrint: null,
+  lastError: null,
+  appVersion: app.getVersion(),
+  updateStatus: null,
+};
 const printQueue = [];
 let isPrinting = false;
 let isQuittingForUpdate = false;
@@ -383,6 +398,8 @@ function broadcastStatus() {
     connection: lastStatus.connection,
     lastPrint: lastStatus.lastPrint,
     lastError: lastStatus.lastError,
+    appVersion: lastStatus.appVersion,
+    updateStatus: lastStatus.updateStatus,
   };
   windows.forEach((w) => {
     if (!w.isDestroyed()) w.webContents.send('status', payload);
@@ -434,6 +451,11 @@ function setLastPrint(summary) {
 
 function setLastError(msg) {
   lastStatus.lastError = msg;
+  broadcastStatus();
+}
+
+function setUpdateStatus(msg) {
+  lastStatus.updateStatus = msg;
   broadcastStatus();
 }
 
@@ -550,6 +572,8 @@ function buildPayloadFromPrintOrderMessage(msg, bundle) {
     payload.totalPedidos = msg.customerOrderCount;
   }
 
+  payload.printItemDescription = msg.printItemDescription === true;
+
   if (Array.isArray(msg.flavors) && msg.flavors.length) {
     payload.__printFlavors = msg.flavors;
   }
@@ -648,6 +672,51 @@ async function handlePrintCaixaFromWebSocket(msg) {
   await enqueuePrintAndWait(bundle, toSend, settings.caixaScriptPath);
 }
 
+async function handlePrintConferenciaFromWebSocket(msg) {
+  const bundle = getPrintBundle();
+  const conferencia = msg?.conferencia;
+  if (!conferencia || typeof conferencia !== 'object') {
+    throw new Error('Campo "conferencia" ausente na mensagem');
+  }
+
+  const { settings } = bundle;
+  if (settings.lojaId > 0) {
+    const conferenciaLoja = Number(conferencia.lojaId ?? conferencia.loja?.id);
+    if (Number.isFinite(conferenciaLoja) && conferenciaLoja !== settings.lojaId) {
+      throw new Error('Conferência pertence a outra loja');
+    }
+  }
+
+  if (!fs.existsSync(settings.conferenciaScriptPath)) {
+    throw new Error('Script de impressão de conferência não encontrado');
+  }
+
+  const sessionStoreName = getSessionStoreName();
+  const storeName =
+    (conferencia.nomeLoja && String(conferencia.nomeLoja).trim()) ||
+    (conferencia.loja?.nome && String(conferencia.loja.nome).trim()) ||
+    sessionStoreName ||
+    'Mira Delivery';
+
+  const toSend = {
+    kind: 'mesa_conferencia',
+    id: conferencia.id ?? `conferencia-${Date.now()}`,
+    ...conferencia,
+    nomeLoja: storeName,
+    loja: {
+      id: conferencia.lojaId ?? conferencia.loja?.id ?? settings.lojaId,
+      nome: storeName,
+    },
+    conferencia: {
+      ...conferencia,
+      nomeLoja: storeName,
+    },
+  };
+
+  setLastPrint(`Conferência ${toSend.mesaNome || toSend.id} (impressão Web)`);
+  await enqueuePrintAndWait(bundle, toSend, settings.conferenciaScriptPath);
+}
+
 function startPrintWebSocketServer(settings) {
   if (!settings.printWsEnabled) {
     console.log('[print-ws] servidor desabilitado (PRINT_WS_ENABLED=0)');
@@ -666,6 +735,7 @@ function startPrintWebSocketServer(settings) {
     host: settings.printWsHost,
     onPrintOrder: handlePrintOrderFromWebSocket,
     onPrintCaixa: handlePrintCaixaFromWebSocket,
+    onPrintConferencia: handlePrintConferenciaFromWebSocket,
   });
 }
 
@@ -1021,6 +1091,15 @@ function createTray() {
     },
     { type: 'separator' },
     {
+      label: `Versão ${app.getVersion()}`,
+      enabled: false,
+    },
+    {
+      label: 'Verificar atualizações',
+      click: () => checkForUpdates(true),
+    },
+    { type: 'separator' },
+    {
       label: 'Sair',
       click: () => app.quit(),
     },
@@ -1086,46 +1165,109 @@ function createMainWindow(startHidden) {
   });
 }
 
+const UPDATE_FIRST_CHECK_DELAY_MS = 15 * 1000;
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const UPDATE_INSTALL_POLL_MS = 5 * 1000;
+
+let autoUpdateSupported = false;
+let updateCheckInFlight = false;
+let updateDownloadedVersion = null;
+let updateInstallTimer = null;
+
+function isPortableBuild() {
+  return !!process.env.PORTABLE_EXECUTABLE_DIR;
+}
+
+function isPrintQueueIdle() {
+  return !isPrinting && printQueue.length === 0;
+}
+
+function installDownloadedUpdateWhenIdle() {
+  if (updateInstallTimer) return;
+  const tryInstall = () => {
+    if (!isPrintQueueIdle()) {
+      updateInstallTimer = setTimeout(tryInstall, UPDATE_INSTALL_POLL_MS);
+      return;
+    }
+    updateInstallTimer = null;
+    setUpdateStatus(`Instalando versão ${updateDownloadedVersion || ''}...`);
+    isQuittingForUpdate = true;
+    setTimeout(() => {
+      // Silencioso + reabrir: o PC da loja não deve ficar parado no assistente do instalador.
+      autoUpdater.quitAndInstall(true, true);
+    }, 1500);
+  };
+  tryInstall();
+}
+
+async function checkForUpdates(manual = false) {
+  if (!autoUpdateSupported) {
+    if (manual) {
+      setUpdateStatus(
+        isPortableBuild()
+          ? 'Versão portátil não atualiza sozinha. Instale a versão com instalador.'
+          : 'Atualização automática disponível apenas no app instalado.'
+      );
+    }
+    return;
+  }
+  if (updateDownloadedVersion) {
+    if (manual) installDownloadedUpdateWhenIdle();
+    return;
+  }
+  if (updateCheckInFlight) return;
+  updateCheckInFlight = true;
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (err) {
+    const msg = err?.message || String(err);
+    console.error('[update] check failed', msg);
+    if (manual) setUpdateStatus('Não foi possível verificar atualizações.');
+  } finally {
+    updateCheckInFlight = false;
+  }
+}
+
 function setupAutoUpdate() {
-  if (!app.isPackaged) return;
+  autoUpdateSupported = app.isPackaged && process.platform === 'win32' && !isPortableBuild();
+  if (!autoUpdateSupported) return;
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.logger = console;
 
   autoUpdater.on('checking-for-update', () => {
-    console.log('[update] checking');
+    setUpdateStatus('Verificando atualizações...');
   });
 
   autoUpdater.on('update-available', (info) => {
-    console.log('[update] available', info?.version || '');
-    setLastError(null);
-    setLastPrint(`Atualizacao ${info?.version || ''} em download...`);
+    setUpdateStatus(`Baixando versão ${info?.version || ''}...`);
   });
 
   autoUpdater.on('update-not-available', () => {
-    console.log('[update] no updates');
+    setUpdateStatus('Você está na versão mais recente.');
+  });
+
+  autoUpdater.on('download-progress', (p) => {
+    const pct = Math.round(Number(p?.percent) || 0);
+    setUpdateStatus(`Baixando atualização... ${pct}%`);
   });
 
   autoUpdater.on('error', (err) => {
     const msg = err?.message || String(err);
     console.error('[update] error', msg);
-    setLastError(`Falha ao buscar atualizacao: ${msg}`);
+    setUpdateStatus('Falha ao atualizar. Nova tentativa mais tarde.');
   });
 
   autoUpdater.on('update-downloaded', (info) => {
-    console.log('[update] downloaded', info?.version || '');
-    setLastError(null);
-    setLastPrint(`Atualizacao ${info?.version || ''} pronta. Reiniciando...`);
-    isQuittingForUpdate = true;
-    setTimeout(() => {
-      autoUpdater.quitAndInstall(false, true);
-    }, 1500);
+    updateDownloadedVersion = info?.version || '';
+    setUpdateStatus(`Versão ${updateDownloadedVersion} baixada. Instalando quando não houver impressão...`);
+    installDownloadedUpdateWhenIdle();
   });
 
-  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-    const msg = err?.message || String(err);
-    console.error('[update] check failed', msg);
-  });
+  setTimeout(() => checkForUpdates(false), UPDATE_FIRST_CHECK_DELAY_MS);
+  setInterval(() => checkForUpdates(false), UPDATE_CHECK_INTERVAL_MS);
 }
 
 function createSetupWindow() {
@@ -1304,6 +1446,7 @@ function registerIpc() {
   ipcMain.on('show-window', () => showMainWindow());
   ipcMain.on('open-setup', () => createSetupWindow());
   ipcMain.on('open-print-size', () => createPrintSizeWindow());
+  ipcMain.handle('check-for-updates', () => checkForUpdates(true));
 
   ipcMain.on('window-minimize', (e) => {
     const w = BrowserWindow.fromWebContents(e.sender);

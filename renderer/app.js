@@ -15,6 +15,9 @@ const printBellEnabledEl = document.getElementById('printBellEnabled');
 const printBellVolumeEl = document.getElementById('printBellVolume');
 const btnMinimize = document.getElementById('btnMinimize');
 const btnClose = document.getElementById('btnClose');
+const appVersionEl = document.getElementById('appVersion');
+const updateStatusEl = document.getElementById('updateStatus');
+const btnCheckUpdate = document.getElementById('btnCheckUpdate');
 
 errRow.hidden = true;
 errEl.textContent = '';
@@ -35,6 +38,8 @@ function render(s) {
   if (typeof s.openAtLogin === 'boolean') {
     loginEl.checked = s.openAtLogin;
   }
+  if (appVersionEl && s.appVersion) appVersionEl.textContent = s.appVersion;
+  if (updateStatusEl) updateStatusEl.textContent = s.updateStatus || '—';
 }
 
 function refreshStoreInfo() {
@@ -65,6 +70,17 @@ btnLogout.addEventListener('click', async () => {
 });
 
 if (btnPrintSize) btnPrintSize.addEventListener('click', () => window.mira.openPrintSize());
+
+if (btnCheckUpdate) {
+  btnCheckUpdate.addEventListener('click', async () => {
+    btnCheckUpdate.disabled = true;
+    try {
+      await window.mira.checkForUpdates();
+    } finally {
+      btnCheckUpdate.disabled = false;
+    }
+  });
+}
 
 if (btnMinimize) btnMinimize.addEventListener('click', () => window.mira.minimizeWindow());
 if (btnClose) btnClose.addEventListener('click', () => window.mira.closeWindow());

@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('mira', {
   showWindow: () => ipcRenderer.send('show-window'),
   openSetup: () => ipcRenderer.send('open-setup'),
   openPrintSize: () => ipcRenderer.send('open-print-size'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   closeWindow: () => ipcRenderer.send('window-close'),
 });
