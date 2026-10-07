@@ -182,6 +182,26 @@ pagamentos.forEach((p) => {
 });
 pushLine('', 'normal');
 
+const mercadoPago =
+  caixa.mercadoPago && typeof caixa.mercadoPago === 'object' && Array.isArray(caixa.mercadoPago.metodos)
+    ? caixa.mercadoPago
+    : null;
+if (mercadoPago && Number(mercadoPago.bruto) > 0) {
+  pushLine(center('MERCADO PAGO', receiptWidth), 'heading');
+  pushLine(divider('-'), 'normal');
+  mercadoPago.metodos.forEach((m) => {
+    const label = `${m.label || m.method}${m.count ? ` (${m.count})` : ''}`;
+    pushLine(moneyRow(label, m.bruto), 'normal');
+    const pct = Number(m.taxaPercent || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+    pushLine(moneyRow(`  Taxa ${pct}%`, -Math.abs(Number(m.taxa || 0))), 'itemDetail');
+  });
+  pushLine(divider('-'), 'normal');
+  pushLine(moneyRow('Total bruto', mercadoPago.bruto), 'normal');
+  pushLine(moneyRow('Total taxas', -Math.abs(Number(mercadoPago.taxas || 0))), 'normal');
+  pushLine(moneyRow('Liquido recebido', mercadoPago.liquido), 'itemPrice');
+  pushLine('', 'normal');
+}
+
 pushLine(center('CONFERENCIA', receiptWidth), 'heading');
 pushLine(divider('-'), 'normal');
 pushLine(moneyRow('Fundo inicial', valorInicial), 'normal');
