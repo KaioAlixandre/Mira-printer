@@ -573,6 +573,7 @@ function buildPayloadFromPrintOrderMessage(msg, bundle) {
   }
 
   payload.printItemDescription = msg.printItemDescription === true;
+  payload.printAdditionalPrices = msg.printAdditionalPrices !== false;
 
   if (Array.isArray(msg.flavors) && msg.flavors.length) {
     payload.__printFlavors = msg.flavors;

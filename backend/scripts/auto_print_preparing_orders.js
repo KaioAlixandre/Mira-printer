@@ -268,7 +268,7 @@ function getItemAdditionalsDetailed(item) {
 
 function parseItemAdditionals(item) {
   return getItemAdditionalsDetailed(item)
-    .map((a) => `${a.qty}x ${a.name} (+${brl(a.value)})`)
+    .map((a) => (printAdditionalPrices ? `${a.qty}x ${a.name} (+${brl(a.value)})` : `${a.qty}x ${a.name}`))
     .join(' | ');
 }
 
@@ -414,14 +414,17 @@ function getItemBasePrice(item) {
   return Number(item?.precoNoPedido ?? item?.priceAtOrder ?? item?.preco ?? item?.product?.price ?? 0);
 }
 
-const items = getPayloadItems(payload);
-const subtotal = items.reduce((sum, item) => {
-  const qty = getItemQty(item);
+// O preço salvo no pedido (precoNoPedido/priceAtOrder) já inclui os adicionais;
+// só somamos quando o payload traz apenas o preço de catálogo do produto.
+function getItemUnitTotal(item) {
   const basePrice = getItemBasePrice(item);
+  if (item?.precoNoPedido != null || item?.priceAtOrder != null) return basePrice;
   const additionalsTotal = getItemAdditionalsDetailed(item).reduce((acc, a) => acc + a.value * a.qty, 0);
-  const unitTotal = basePrice + additionalsTotal;
-  return sum + unitTotal * qty;
-}, 0);
+  return basePrice + additionalsTotal;
+}
+
+const items = getPayloadItems(payload);
+const subtotal = items.reduce((sum, item) => sum + getItemUnitTotal(item) * getItemQty(item), 0);
 
 const deliveryFee = Number(payload.taxaEntrega ?? payload.deliveryFee ?? 0);
 const total = Number(payload.precoTotal ?? payload.totalPrice ?? 0);
@@ -440,6 +443,8 @@ const storeName =
 const printCfg = payload.__autoPrintConfig || {};
 const printItemDescription =
   printCfg.printItemDescription === true || payload.printItemDescription === true;
+const printAdditionalPrices =
+  printCfg.printAdditionalPrices !== false && payload.printAdditionalPrices !== false;
 const localPrinterType = String(process.env.MIRA_PRINTER_TYPE || '').trim();
 const localPrinterTarget = String(process.env.MIRA_PRINTER_TARGET || '').trim();
 const localPaperWidth = Number(process.env.MIRA_PAPER_WIDTH_MM || 0);
@@ -829,10 +834,7 @@ if (!items.length) {
 } else {
   items.forEach((item) => {
     const qty = getItemQty(item);
-    const basePrice = getItemBasePrice(item);
-    const additionalsTotal = getItemAdditionalsDetailed(item).reduce((acc, a) => acc + a.value * a.qty, 0);
-    const unitTotal = basePrice + additionalsTotal;
-    const lineTotal = unitTotal * qty;
+    const lineTotal = getItemUnitTotal(item) * qty;
     const itemName = resolveItemName(item);
 
     const priceStr = brl(lineTotal);

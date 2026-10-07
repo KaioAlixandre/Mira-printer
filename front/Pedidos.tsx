@@ -1433,10 +1433,8 @@ const Pedidos: React.FC<{
                     const isCustomSorvete = item.selectedOptionsSnapshot?.customSorvete;
                     const isCustomProduct = item.selectedOptionsSnapshot?.customProduct;
                     const customData = isCustomAcai || isCustomSorvete || isCustomProduct;
-                    const additionalsTotal = Array.isArray((item as any).additionals)
-                      ? (item as any).additionals.reduce((acc: number, a: any) => acc + (Number(a.value || 0) * Number(a.quantity || 0)), 0)
-                      : 0;
-                    const unitPrice = Number(item.priceAtOrder || 0) + additionalsTotal;
+                    // priceAtOrder já inclui os adicionais do item.
+                    const unitPrice = Number(item.priceAtOrder || 0);
                     
                     if (!item.product) return null;
                     
