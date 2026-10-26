@@ -268,8 +268,7 @@ function getItemAdditionalsDetailed(item) {
 
 function parseItemAdditionals(item) {
   return getItemAdditionalsDetailed(item)
-    .map((a) => (printAdditionalPrices ? `${a.qty}x ${a.name} (+${brl(a.value)})` : `${a.qty}x ${a.name}`))
-    .join(' | ');
+    .map((a) => (printAdditionalPrices ? `${a.qty}x ${a.name} (+${brl(a.value)})` : `${a.qty}x ${a.name}`));
 }
 
 function parseItemComplements(item) {
@@ -325,7 +324,7 @@ function parseItemComplements(item) {
     customData.complementNames.forEach(pushIfValid);
   }
 
-  return [...new Set(complementNames)].join(', ');
+  return [...new Set(complementNames)];
 }
 
 function parseItemFlavors(item) {
@@ -397,7 +396,7 @@ function parseItemFlavors(item) {
     }
   }
 
-  return [...new Set(flavorNames)].join(', ');
+  return [...new Set(flavorNames)];
 }
 
 function getPayloadItems(payloadObj) {
@@ -445,6 +444,27 @@ const printItemDescription =
   printCfg.printItemDescription === true || payload.printItemDescription === true;
 const printAdditionalPrices =
   printCfg.printAdditionalPrices !== false && payload.printAdditionalPrices !== false;
+const printExtrasStacked =
+  printCfg.printExtrasStacked === true || payload.printExtrasStacked === true;
+const printItemsSeparated =
+  printCfg.printItemsSeparated === true || payload.printItemsSeparated === true;
+
+function expandItemsForPrint(list, separated) {
+  if (!separated) return list;
+  const expanded = [];
+  for (const item of list) {
+    const qty = getItemQty(item);
+    const times = Number.isFinite(qty) && qty > 1 ? Math.trunc(qty) : 1;
+    if (times <= 1) {
+      expanded.push(item);
+      continue;
+    }
+    for (let i = 0; i < times; i += 1) {
+      expanded.push({ ...item, quantity: 1, quantidade: 1 });
+    }
+  }
+  return expanded;
+}
 const localPrinterType = String(process.env.MIRA_PRINTER_TYPE || '').trim();
 const localPrinterTarget = String(process.env.MIRA_PRINTER_TARGET || '').trim();
 const localPaperWidth = Number(process.env.MIRA_PAPER_WIDTH_MM || 0);
@@ -649,6 +669,12 @@ pushLine('', 'normal');
 // Número e data do pedido
 const orderNumber = `PEDIDO #${payload.dailyNumber || payload.id}`;
 pushLine(center(orderNumber, receiptWidth), 'normal');
+if (payload.forceReprint === true || payload.printBanner) {
+  pushLine(
+    center(String(payload.printBanner || 'PEDIDO ATUALIZADO').trim(), receiptWidth),
+    'titleCenter'
+  );
+}
 pushLine(center(formatDate(payload.criadoEm || payload.createdAt), receiptWidth), 'normal');
 const previsaoEntrega = firstNonEmpty(
   payload.previsaoEntrega,
@@ -733,11 +759,13 @@ let clientName = firstNonEmpty(
   payload.customer?.name
 );
 if (!clientName) {
-  clientName = firstNonEmpty(
-    clientEmail ? clientEmail.split('@')[0] : '',
-    clientPhone ? `Cliente (${String(clientPhone).replace(/\D/g, '').slice(-4) || clientPhone})` : '',
-    '-'
-  );
+  clientName = isCounterUser
+    ? 'Não identificado'
+    : firstNonEmpty(
+        clientEmail ? clientEmail.split('@')[0] : '',
+        clientPhone ? `Cliente (${String(clientPhone).replace(/\D/g, '').slice(-4) || clientPhone})` : '',
+        '-'
+      );
 }
 const totalOrders = firstNonEmpty(payload.totalPedidos, payload.usuario?.totalPedidos, payload.user?.totalPedidos);
 const hasClientBlock = !!(
@@ -829,10 +857,12 @@ const itemDetailWidth = Math.max(18, receiptWidth - 1);
 pushLine('', 'normal');
 pushLine(sectionHeader('ITENS'), 'normal');
 
-if (!items.length) {
+const printItems = expandItemsForPrint(items, printItemsSeparated);
+
+if (!printItems.length) {
   pushLine('Sem itens no payload', 'normal');
 } else {
-  items.forEach((item) => {
+  printItems.forEach((item) => {
     const qty = getItemQty(item);
     const lineTotal = getItemUnitTotal(item) * qty;
     const itemName = resolveItemName(item);
@@ -862,14 +892,26 @@ if (!items.length) {
     const flavors = parseItemFlavors(item);
     const complements = parseItemComplements(item);
     const additionals = parseItemAdditionals(item);
-    if (flavors) {
-      wrapText(`Sabor: ${flavors}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
-    }
-    if (complements) {
-      wrapText(`Compl: ${complements}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
-    }
-    if (additionals) {
-      wrapText(`Adic: ${additionals}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+    if (printExtrasStacked) {
+      flavors.forEach((f) => {
+        wrapText(f, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+      });
+      complements.forEach((c) => {
+        wrapText(`+ ${c}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+      });
+      additionals.forEach((a) => {
+        wrapText(a, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+      });
+    } else {
+      if (flavors.length) {
+        wrapText(`Sabor: ${flavors.join(', ')}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+      }
+      if (complements.length) {
+        wrapText(`Compl: ${complements.join(', ')}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+      }
+      if (additionals.length) {
+        wrapText(`Adic: ${additionals.join(' | ')}`, itemDetailWidth).forEach((l) => pushLine(`  ${l}`, 'normal'));
+      }
     }
 
     const itemObs = extractItemObs(item);
@@ -1078,13 +1120,19 @@ function Resolve-MiraPrinter([string]$name) {
   }
   return $null
 }
-$printerName = Resolve-MiraPrinter $wanted
+Add-Type -AssemblyName System.Drawing
+$probe = New-Object System.Drawing.Printing.PrinterSettings
+$probe.PrinterName = $wanted
+if ($probe.IsValid) {
+  $printerName = $wanted
+} else {
+  $printerName = Resolve-MiraPrinter $wanted
+}
 if (-not $printerName) {
   $available = (Get-Printer | Select-Object -ExpandProperty Name) -join ', '
   Write-Error ("Impressora nao encontrada. Configurado: " + $wanted + ". Instaladas: " + $available)
   exit 2
 }
-Add-Type -AssemblyName System.Drawing
 
 function New-MiraMonoFont([float]$size) {
   try {
@@ -1142,6 +1190,7 @@ $script:miraFontScale = $fontScale
 $script:miraContentWidth = 0.0
 
 $doc = New-Object System.Drawing.Printing.PrintDocument
+$doc.PrintController = New-Object System.Drawing.Printing.StandardPrintController
 $doc.PrinterSettings.PrinterName = $printerName
 $doc.DocumentName = 'Mira Pedido'
 $doc.OriginAtMargins = $false

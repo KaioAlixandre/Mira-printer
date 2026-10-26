@@ -255,13 +255,19 @@ function Resolve-MiraPrinter([string]$name) {
   }
   return $null
 }
-$printerName = Resolve-MiraPrinter $wanted
+Add-Type -AssemblyName System.Drawing
+$probe = New-Object System.Drawing.Printing.PrinterSettings
+$probe.PrinterName = $wanted
+if ($probe.IsValid) {
+  $printerName = $wanted
+} else {
+  $printerName = Resolve-MiraPrinter $wanted
+}
 if (-not $printerName) {
   $available = (Get-Printer | Select-Object -ExpandProperty Name) -join ', '
   Write-Error ("Impressora nao encontrada. Configurado: " + $wanted + ". Instaladas: " + $available)
   exit 2
 }
-Add-Type -AssemblyName System.Drawing
 
 function New-MiraMonoFont([float]$size) {
   try {
@@ -319,6 +325,7 @@ $script:miraFontScale = $fontScale
 $script:miraContentWidth = 0.0
 
 $doc = New-Object System.Drawing.Printing.PrintDocument
+$doc.PrintController = New-Object System.Drawing.Printing.StandardPrintController
 $doc.PrinterSettings.PrinterName = $printerName
 $doc.DocumentName = '${safeDocName}'
 $doc.OriginAtMargins = $false

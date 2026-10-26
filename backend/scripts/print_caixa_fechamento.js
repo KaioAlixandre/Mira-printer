@@ -174,6 +174,21 @@ pushLine(moneyRow('Ticket medio', ticketMedio), 'normal');
 pushLine(moneyRow('Total vendas', totalVendas), 'itemPrice');
 pushLine('', 'normal');
 
+const totalDescontosMesa = Number(caixa.totalDescontosMesa ?? 0);
+const totalDescontosCupom = Number(caixa.totalDescontosCupom ?? 0);
+const totalDescontos = Number(
+  caixa.totalDescontos ?? totalDescontosMesa + totalDescontosCupom
+);
+const totalTaxaEntrega = Number(caixa.totalTaxaEntrega ?? 0);
+
+pushLine(center('METRICAS DO DIA', receiptWidth), 'heading');
+pushLine(divider('-'), 'normal');
+pushLine(moneyRow('Taxa de entrega', totalTaxaEntrega), 'normal');
+pushLine(moneyRow('Descontos de mesa', -Math.abs(totalDescontosMesa)), 'itemDetail');
+pushLine(moneyRow('Descontos/cupom', -Math.abs(totalDescontosCupom)), 'itemDetail');
+pushLine(moneyRow('Total descontos', -Math.abs(totalDescontos)), 'itemPrice');
+pushLine('', 'normal');
+
 pushLine(center('PAGAMENTOS', receiptWidth), 'heading');
 pushLine(divider('-'), 'normal');
 pagamentos.forEach((p) => {

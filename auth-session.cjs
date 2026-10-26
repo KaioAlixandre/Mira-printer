@@ -6,8 +6,31 @@ function sessionFile(userData) {
   return path.join(userData, 'session.json');
 }
 
+function decryptField(raw, prefix) {
+  const cipher = raw[`${prefix}Cipher`];
+  if (raw[`${prefix}CipherKind`] === 'safeStorage' && cipher) {
+    try {
+      return safeStorage.decryptString(Buffer.from(cipher, 'base64'));
+    } catch {
+      return null;
+    }
+  }
+  return raw[`${prefix}PlainInsecure`] || null;
+}
+
+function encryptField(out, prefix, value) {
+  if (!value) return;
+  if (safeStorage.isEncryptionAvailable()) {
+    const enc = safeStorage.encryptString(value);
+    out[`${prefix}Cipher`] = Buffer.from(enc).toString('base64');
+    out[`${prefix}CipherKind`] = 'safeStorage';
+  } else {
+    out[`${prefix}PlainInsecure`] = value;
+  }
+}
+
 /**
- * @returns {{ apiHttpBase: string, lojaSubdominio: string, lojaId: number, lojaNome?: string, token: string } | null}
+ * @returns {{ apiHttpBase: string, lojaSubdominio: string, lojaId: number, lojaNome?: string, token: string, refreshToken: string | null } | null}
  */
 function loadSession(userData) {
   const p = sessionFile(userData);
@@ -19,17 +42,7 @@ function loadSession(userData) {
     return null;
   }
 
-  let token = null;
-  if (raw.tokenCipherKind === 'safeStorage' && raw.tokenCipher) {
-    try {
-      token = safeStorage.decryptString(Buffer.from(raw.tokenCipher, 'base64'));
-    } catch {
-      return null;
-    }
-  } else if (raw.tokenPlainInsecure) {
-    token = raw.tokenPlainInsecure;
-  }
-
+  const token = decryptField(raw, 'token');
   if (!token) return null;
 
   return {
@@ -38,20 +51,16 @@ function loadSession(userData) {
     lojaId: Number(raw.lojaId),
     lojaNome: raw.lojaNome,
     token,
+    refreshToken: decryptField(raw, 'refreshToken'),
   };
 }
 
 function saveSession(userData, data) {
-  const { token, ...meta } = data;
-  const out = { ...meta, version: 1 };
+  const { token, refreshToken, ...meta } = data;
+  const out = { ...meta, version: 2 };
 
-  if (token && safeStorage.isEncryptionAvailable()) {
-    const enc = safeStorage.encryptString(token);
-    out.tokenCipher = Buffer.from(enc).toString('base64');
-    out.tokenCipherKind = 'safeStorage';
-  } else if (token) {
-    out.tokenPlainInsecure = token;
-  }
+  encryptField(out, 'token', token);
+  encryptField(out, 'refreshToken', refreshToken);
 
   fs.mkdirSync(userData, { recursive: true });
   fs.writeFileSync(sessionFile(userData), JSON.stringify(out), 'utf8');

@@ -574,6 +574,8 @@ function buildPayloadFromPrintOrderMessage(msg, bundle) {
 
   payload.printItemDescription = msg.printItemDescription === true;
   payload.printAdditionalPrices = msg.printAdditionalPrices !== false;
+  payload.printItemsSeparated = msg.printItemsSeparated === true;
+  payload.printExtrasStacked = msg.printExtrasStacked === true;
 
   if (Array.isArray(msg.flavors) && msg.flavors.length) {
     payload.__printFlavors = msg.flavors;
@@ -981,12 +983,17 @@ function handleIncomingEvent(bundle, eventName, rawPayload) {
   }
 
   if (!shouldTrigger(kind, settings.triggers)) return;
-  if (dedupStore.isDup(orderId, kind)) {
+  const forceReprint =
+    payload.forceReprint === true ||
+    orderDataFromPayload(payload)?.forceReprint === true;
+  if (!forceReprint && dedupStore.isDup(orderId, kind)) {
     console.log('[dedup] skip', orderId, kind);
     return;
   }
 
-  dedupStore.mark(orderId, kind);
+  if (!forceReprint) {
+    dedupStore.mark(orderId, kind);
+  }
   const toSend = normalizePayloadForScript(payload, kind);
 
   setLastPrint(
@@ -994,6 +1001,155 @@ function handleIncomingEvent(bundle, eventName, rawPayload) {
   );
 
   enqueuePrintTimes(bundle, toSend, resolveOrderPrintCopies());
+}
+
+const REFRESH_COOKIE_BASE = 'md_refresh';
+const SESSION_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const SESSION_REFRESH_BEFORE_MS = 10 * 24 * 60 * 60 * 1000;
+const SESSION_RETRY_MS = 60 * 1000;
+
+const SESSION_FORCED_MIN_INTERVAL_MS = 30 * 1000;
+
+let refreshInFlight = null;
+let sessionRetryTimer = null;
+let lastForcedRefreshAt = 0;
+
+function refreshCookieName(lojaId) {
+  return Number(lojaId) > 0 ? `${REFRESH_COOKIE_BASE}_${Number(lojaId)}` : REFRESH_COOKIE_BASE;
+}
+
+function extractRefreshCookie(res, lojaId) {
+  const cookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+  const names = [refreshCookieName(lojaId), REFRESH_COOKIE_BASE];
+  for (const name of names) {
+    for (const cookie of cookies) {
+      const pair = String(cookie).split(';')[0];
+      const idx = pair.indexOf('=');
+      if (idx <= 0 || pair.slice(0, idx).trim() !== name) continue;
+      const value = pair.slice(idx + 1).trim();
+      if (value) return decodeURIComponent(value);
+    }
+  }
+  return null;
+}
+
+function buildRefreshHeaders(sess) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (sess.lojaSubdominio) headers['x-loja-subdominio'] = sess.lojaSubdominio;
+  if (sess.refreshToken) {
+    headers.Cookie = `${refreshCookieName(sess.lojaId)}=${encodeURIComponent(sess.refreshToken)}`;
+  }
+  return headers;
+}
+
+function tokenExpiresAtMs(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(String(token).split('.')[1], 'base64url').toString('utf8'));
+    return Number(payload.exp) > 0 ? Number(payload.exp) * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/** @returns {Promise<{ ok: true, token: string } | { ok: false, reason: 'no_session' | 'no_refresh' | 'expired' | 'network' | 'server' }>} */
+function refreshSessionToken() {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const userData = app.getPath('userData');
+    const sess = loadSession(userData);
+    if (!sess?.token) return { ok: false, reason: 'no_session' };
+    if (!sess.refreshToken) return { ok: false, reason: 'no_refresh' };
+
+    let res;
+    try {
+      res = await fetch(`${normalizeApiBase(sess.apiHttpBase)}/api/auth/refresh`, {
+        method: 'POST',
+        headers: buildRefreshHeaders(sess),
+        body: '{}',
+      });
+    } catch (e) {
+      console.warn('[auth] refresh sem conexão:', e?.message || e);
+      return { ok: false, reason: 'network' };
+    }
+
+    if (res.status === 401) return { ok: false, reason: 'expired' };
+    if (!res.ok) return { ok: false, reason: 'server' };
+
+    const data = await res.json().catch(() => null);
+    if (!data?.token) return { ok: false, reason: 'server' };
+
+    // Logout ou novo login durante a requisição: não ressuscitar a sessão antiga.
+    const current = loadSession(userData);
+    if (!current || current.refreshToken !== sess.refreshToken) return { ok: false, reason: 'no_session' };
+
+    saveSession(userData, {
+      ...current,
+      token: data.token,
+      refreshToken: extractRefreshCookie(res, sess.lojaId) || sess.refreshToken,
+    });
+    console.log('[auth] sessão renovada');
+    return { ok: true, token: data.token };
+  })().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+function scheduleSessionRetry() {
+  if (sessionRetryTimer) return;
+  sessionRetryTimer = setTimeout(() => {
+    sessionRetryTimer = null;
+    void ensureFreshSession(true);
+  }, SESSION_RETRY_MS);
+}
+
+/**
+ * Renova o token antes de vencer (ou imediatamente, se `force`) e reconecta o socket.
+ * Só pede login de novo se o servidor recusar o refresh token.
+ */
+async function ensureFreshSession(force = false) {
+  const sess = loadSession(app.getPath('userData'));
+  if (!sess?.token) return;
+
+  if (!force) {
+    const exp = tokenExpiresAtMs(sess.token);
+    if (exp && exp - Date.now() > SESSION_REFRESH_BEFORE_MS) return;
+  }
+
+  const result = await refreshSessionToken();
+  if (result.ok) {
+    const { merged, paths } = loadMergedConfig();
+    configBundle = buildConfig(loadSession(app.getPath('userData')), merged, paths);
+    if (socket?.connected) {
+      socket.auth = { token: result.token };
+    } else {
+      connectSocket(configBundle, result.token);
+    }
+    return;
+  }
+
+  if (result.reason === 'network' || result.reason === 'server') {
+    scheduleSessionRetry();
+    return;
+  }
+
+  if (result.reason === 'expired' || result.reason === 'no_refresh') {
+    const exp = tokenExpiresAtMs(sess.token);
+    if (force || (exp && exp <= Date.now())) {
+      setLastError('Sessão expirada — abra Login e entre novamente.');
+    }
+  }
+}
+
+async function revokeRemoteSession(sess) {
+  if (!sess?.refreshToken) return;
+  try {
+    await fetch(`${normalizeApiBase(sess.apiHttpBase)}/api/auth/logout`, {
+      method: 'POST',
+      headers: buildRefreshHeaders(sess),
+      body: '{}',
+    });
+  } catch (_) {}
 }
 
 function connectSocket(bundle, token) {
@@ -1037,10 +1193,20 @@ function connectSocket(bundle, token) {
     setConnection('desconectado');
     setLastError(msg);
 
-    const relog =
-      /TOKEN_EXPIRED|MISSING_TOKEN|FORBIDDEN|UNAUTHORIZED|INVALID_TOKEN|NOT_AUTHORIZED/i.test(msg);
-    if (relog) {
-      setLastError('Sessão inválida ou expirada — abra Login e entre novamente.');
+    if (/TOKEN_EXPIRED|INVALID_TOKEN|MISSING_TOKEN/i.test(msg)) {
+      setLastError('Renovando sessão...');
+      // Erro do middleware de auth não reconecta sozinho; renovar e reconectar com o token novo.
+      if (Date.now() - lastForcedRefreshAt < SESSION_FORCED_MIN_INTERVAL_MS) {
+        scheduleSessionRetry();
+      } else {
+        lastForcedRefreshAt = Date.now();
+        void ensureFreshSession(true);
+      }
+      return;
+    }
+
+    if (/FORBIDDEN|UNAUTHORIZED|NOT_AUTHORIZED|INVALID_USER/i.test(msg)) {
+      setLastError('Sessão inválida — abra Login e entre novamente.');
     }
   });
 
@@ -1401,6 +1567,7 @@ function registerIpc() {
       lojaId: data.loja?.id,
       lojaNome: data.loja?.nome,
       token,
+      refreshToken: extractRefreshCookie(res, data.loja?.id),
     });
 
     const { merged, paths } = loadMergedConfig();
@@ -1429,7 +1596,9 @@ function registerIpc() {
 
   ipcMain.handle('auth-logout', async () => {
     const userData = app.getPath('userData');
+    const previous = loadSession(userData);
     clearSession(userData);
+    void revokeRemoteSession(previous);
     if (socket) {
       try {
         socket.disconnect();
@@ -1529,10 +1698,17 @@ function initApp() {
 
   if (session?.token) {
     createMainWindow(startMinimized);
-    connectSocket(configBundle, session.token);
+    const exp = tokenExpiresAtMs(session.token);
+    if (exp && exp <= Date.now()) {
+      void ensureFreshSession(true);
+    } else {
+      connectSocket(configBundle, session.token);
+      void ensureFreshSession(false);
+    }
   } else {
     createSetupWindow();
   }
+  setInterval(() => void ensureFreshSession(false), SESSION_CHECK_INTERVAL_MS);
 
   if (merged.OPEN_AT_LOGIN === '1' || merged.openAtLogin === '1') {
     applyOpenAtLogin(true);
