@@ -315,11 +315,15 @@ function normalizePayloadForScript(payload, kind) {
       base.criadoPor?.username ||
       null;
     const mesaNome = base.mesaNome || base.mesa?.nome || null;
+    const customerOrderCount = base.customerOrderCount ?? base.totalPedidos ?? null;
     return {
       ...base,
       id: normalizedId,
       criadoPorGarcomNome,
       mesaNome,
+      ...(customerOrderCount != null
+        ? { customerOrderCount, totalPedidos: base.totalPedidos ?? customerOrderCount }
+        : {}),
       _printKind: kind,
       _source: 'mira-printer-agent',
     };
@@ -570,6 +574,7 @@ function buildPayloadFromPrintOrderMessage(msg, bundle) {
 
   if (msg.customerOrderCount != null) {
     payload.totalPedidos = msg.customerOrderCount;
+    payload.customerOrderCount = msg.customerOrderCount;
   }
 
   payload.printItemDescription = msg.printItemDescription === true;

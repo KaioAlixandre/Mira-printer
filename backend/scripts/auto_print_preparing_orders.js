@@ -767,7 +767,22 @@ if (!clientName) {
         '-'
       );
 }
-const totalOrders = firstNonEmpty(payload.totalPedidos, payload.usuario?.totalPedidos, payload.user?.totalPedidos);
+function resolveCustomerOrderCount(payloadObj) {
+  const raw = firstNonEmpty(
+    payloadObj?.customerOrderCount,
+    payloadObj?.totalPedidos,
+    payloadObj?.usuario?.totalPedidos,
+    payloadObj?.usuario?.customerOrderCount,
+    payloadObj?.user?.totalPedidos,
+    payloadObj?.user?.customerOrderCount
+  );
+  if (!raw) return '';
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return '';
+  return String(Math.trunc(n));
+}
+
+const totalOrders = resolveCustomerOrderCount(payload);
 const hasClientBlock = !!(
   payload.nomeClienteAvulso ||
   (!isCounterUser &&
@@ -824,7 +839,9 @@ if (showClientDeliveryBlock) {
     wrapText(`Nome: ${clientName}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
     if (clientPhone) wrapText(`Telefone: ${clientPhone}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
     if (!isCounterUser && clientEmail) wrapText(`E-mail: ${clientEmail}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
-    if (totalOrders) wrapText(`Pedidos: ${totalOrders}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    if (totalOrders) {
+      wrapText(`Total de pedidos: ${totalOrders}`, receiptWidth).forEach((l) => pushLine(l, 'normal'));
+    }
   }
   if (deliveryTypeLower === 'delivery' && hasDeliveryAddress) {
     if (hasClientBlock) pushLine('', 'normal');
